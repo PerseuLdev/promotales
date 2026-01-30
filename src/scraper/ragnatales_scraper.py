@@ -232,26 +232,41 @@ class RagnatalesScraper:
         linhas = texto.split('\n')
         ofertas = []
         oferta_atual = []
+        dentro_cartas = False
 
         for linha in linhas:
             linha_strip = linha.strip()
+
+            # Marca quando entra/sai da secao de cartas
+            if linha_strip == "Cartas Equipadas:":
+                dentro_cartas = True
+                if oferta_atual:
+                    oferta_atual.append(linha_strip)
+                continue
+            elif "Bônus Aleatórios:" in linha_strip or linha_strip.startswith("Vendedor:"):
+                dentro_cartas = False
 
             # Detecta inicio de nova oferta
             # Equipamento: +9NomeItem [1] (id: xxx) ou NomeItem [1] (id: xxx)
             # Item simples: NomeItem (id: xxx) - sem [slots]
             is_nova_oferta = False
 
-            # Padrao equipamento: tem [slots]
-            if re.match(r'^(\+\d+)?[A-Z].*\[.*\]\s*\(id:', linha_strip):
-                is_nova_oferta = True
-            # Padrao item simples: nao tem [slots], mas tem (id:)
-            elif re.match(r'^[A-Z].*\(id:\s*\d+\)', linha_strip) and '[' not in linha_strip:
-                is_nova_oferta = True
+            # Nao detecta nova oferta se estiver dentro da secao de cartas
+            if not dentro_cartas:
+                # Padrao equipamento: tem [slots] e (id:)
+                if re.match(r'^(\+\d+)?[A-Z].*\[\d\]\s*\(id:', linha_strip):
+                    is_nova_oferta = True
+                # Padrao item simples: nao tem [slots], mas tem (id:) e NAO comeca com "Carta"
+                elif re.match(r'^[A-Z].*\(id:\s*\d+\)', linha_strip) and '[' not in linha_strip:
+                    # Ignora se parece ser uma carta
+                    if not linha_strip.startswith("Carta "):
+                        is_nova_oferta = True
 
             if is_nova_oferta:
                 if oferta_atual:
                     ofertas.append('\n'.join(oferta_atual))
                 oferta_atual = [linha_strip]
+                dentro_cartas = False
             elif oferta_atual:
                 oferta_atual.append(linha_strip)
 
@@ -293,8 +308,11 @@ class RagnatalesScraper:
             if not ofertas:
                 raise ItemNotFoundException(item_name)
 
+            # Usa o nome real do item (da primeira oferta) em vez do termo buscado
+            nome_real = ofertas[0].nome if ofertas else item_name
+
             result = ItemSearchResult(
-                item_nome=item_name,
+                item_nome=nome_real,
                 ofertas=ofertas,
                 preco_medio=preco_medio,
                 volume_vendas=volume_vendas

@@ -24,11 +24,11 @@ class Settings:
     # Ragnatales
     RAGNATALES_URL: str = "https://ragnatales.com.br/db/items"
     
-    # Timeouts (em segundos) - Total ~10s
-    PAGE_LOAD_TIMEOUT: int = 5  # Tempo para Cloudflare resolver
-    SEARCH_TIMEOUT: int = 2
-    CLICK_TIMEOUT: int = 1
-    SHOPS_TIMEOUT: int = 2
+    # Timeouts (em segundos) - Total ~15s
+    PAGE_LOAD_TIMEOUT: int = 7  # Tempo para Cloudflare resolver
+    SEARCH_TIMEOUT: int = 3
+    CLICK_TIMEOUT: int = 2
+    SHOPS_TIMEOUT: int = 3
     
     # Chrome Options
     CHROME_WINDOW_SIZE: str = "--window-size=1920,1080"

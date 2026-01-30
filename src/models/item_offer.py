@@ -18,6 +18,14 @@ class ItemOffer:
     vendedor: str = ""
     descricao_loja: str = ""
     quantidade: int = 1  # Para itens simples (nao-equipamentos)
+    item_id: Optional[str] = None  # ID do item para gerar link
+
+    @property
+    def link(self) -> str:
+        """Retorna o link do item no site"""
+        if self.item_id:
+            return f"https://ragnatales.com.br/db/items/{self.item_id}"
+        return ""
 
     @property
     def is_equipamento(self) -> bool:
@@ -49,6 +57,10 @@ class ItemOffer:
             # Primeira linha: nome do item (pode ter refinamento)
             primeira_linha = linhas[0].strip()
 
+            # Extrai ID do item
+            id_match = re.search(r'\(id:\s*(\d+)\)', primeira_linha)
+            item_id = id_match.group(1) if id_match else None
+
             # Extrai refinamento (+0, +7, +9, +10, etc)
             refino_match = re.match(r'^\+(\d+)', primeira_linha)
             refinamento = int(refino_match.group(1)) if refino_match else 0
@@ -65,9 +77,9 @@ class ItemOffer:
             is_simple = cls._detect_simple_item(linhas)
 
             if is_simple:
-                return cls._parse_simple_item(linhas, nome)
+                return cls._parse_simple_item(linhas, nome, item_id)
             else:
-                return cls._parse_equipment(linhas, nome, refinamento)
+                return cls._parse_equipment(linhas, nome, refinamento, item_id)
 
         except Exception:
             return None
@@ -112,7 +124,7 @@ class ItemOffer:
         return False
 
     @classmethod
-    def _parse_simple_item(cls, linhas: List[str], nome: str) -> Optional['ItemOffer']:
+    def _parse_simple_item(cls, linhas: List[str], nome: str, item_id: Optional[str] = None) -> Optional['ItemOffer']:
         """
         Parseia um item simples (consumivel, ETC, municao, carta, pet).
 
@@ -172,11 +184,12 @@ class ItemOffer:
             bonus_aleatorios=[],
             vendedor=vendedor,
             descricao_loja=descricao_loja,
-            quantidade=quantidade
+            quantidade=quantidade,
+            item_id=item_id
         )
 
     @classmethod
-    def _parse_equipment(cls, linhas: List[str], nome: str, refinamento: int) -> Optional['ItemOffer']:
+    def _parse_equipment(cls, linhas: List[str], nome: str, refinamento: int, item_id: Optional[str] = None) -> Optional['ItemOffer']:
         """
         Parseia um equipamento (arma, armadura, acessorio).
 
@@ -226,21 +239,35 @@ class ItemOffer:
                 continue
 
             # Processa conforme o modo
-            if modo == 'cartas' and linha and not linha.startswith('1'):
+            if modo == 'cartas' and linha:
+                # Ignora linhas que sao apenas numeros ou "Item Icon"
+                if linha.isdigit() or linha == "Item Icon":
+                    continue
                 carta = re.sub(r'\s*\(id:\s*\d+\)', '', linha).strip()
-                if carta and not carta.isdigit():
+                if carta and not carta.isdigit() and carta != "Item Icon":
                     cartas.append(carta)
             elif modo == 'bonus' and linha:
-                if re.search(r'[+\-]\d+%?$', linha) or 'Ignora o Requisito' in linha:
+                # Aceita bonus que contenham +X, -X, X% ou palavras-chave
+                is_bonus = (
+                    re.search(r'[+\-]\d+%?', linha) or  # Contem +X ou -X ou X%
+                    'Ignora' in linha or
+                    'Reduz' in linha or
+                    'Recupera' in linha or
+                    'Aumenta' in linha or
+                    'Resist' in linha or
+                    '%' in linha
+                )
+                if is_bonus:
                     bonus_aleatorios.append(linha)
-                elif linha.isdigit() or linha in ['1', '2', '3']:
+                elif linha.isdigit() or linha == "Item Icon":
                     continue
                 else:
+                    # Fim dos bonus, provavelmente e descricao da loja
                     modo = None
-                    if not descricao_loja:
+                    if not descricao_loja and not linha.isdigit():
                         descricao_loja = linha
             elif modo is None and linha and not linha.isdigit():
-                if not descricao_loja and linha not in ['1', '2', '3']:
+                if not descricao_loja and linha not in ['1', '2', '3'] and linha != "Item Icon":
                     descricao_loja = linha
 
         if not preco or not localizacao:
@@ -255,7 +282,8 @@ class ItemOffer:
             bonus_aleatorios=bonus_aleatorios,
             vendedor=vendedor,
             descricao_loja=descricao_loja,
-            quantidade=1
+            quantidade=1,
+            item_id=item_id
         )
 
     def preco_formatado(self) -> str:
@@ -310,6 +338,10 @@ class ItemOffer:
                     msg += f"✨ *Bonus:*\n"
                     for bonus in self.bonus_aleatorios:
                         msg += f"   • {bonus}\n"
+
+        # Link do item
+        if self.link:
+            msg += f"\n🔗 [Ver no site]({self.link})"
 
         return msg.strip()
 

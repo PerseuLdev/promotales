@@ -74,35 +74,35 @@ class TelegramBot:
         )
         await update.message.reply_text(help_message, parse_mode='Markdown')
 
-    def _create_refinement_keyboard(self, result: ItemSearchResult, localizacao: str = "") -> InlineKeyboardMarkup:
+    def _create_refinement_keyboard(self, result: ItemSearchResult) -> InlineKeyboardMarkup:
         """Cria teclado inline com opcoes de refinamento individuais"""
-        refinos = result.refinamentos_disponiveis()
-
         buttons = []
-        row = []
 
-        # Cria botao para cada refino disponivel
-        for refino in sorted(refinos):
-            label = f"+{refino}" if refino > 0 else "+0"
-            row.append(InlineKeyboardButton(label, callback_data=f"ref_{refino}"))
+        # So mostra botoes de refinamento para equipamentos
+        if result.is_equipamento():
+            refinos = result.refinamentos_disponiveis()
+            row = []
 
-            # 4 botoes por linha
-            if len(row) >= 4:
+            # Cria botao para cada refino disponivel
+            for refino in sorted(refinos):
+                label = f"+{refino}" if refino > 0 else "+0"
+                row.append(InlineKeyboardButton(label, callback_data=f"ref_{refino}"))
+
+                # 4 botoes por linha
+                if len(row) >= 4:
+                    buttons.append(row)
+                    row = []
+
+            # Adiciona ultima linha se houver botoes
+            if row:
                 buttons.append(row)
-                row = []
 
-        # Adiciona ultima linha se houver botoes
-        if row:
-            buttons.append(row)
+        # Adiciona botao com link do produto (usa primeira oferta que tenha link)
+        link = next((o.link for o in result.ofertas if o.link), None)
+        if link:
+            buttons.append([InlineKeyboardButton("🔗 Ver no site", url=link)])
 
-        # Botao de mais barato geral
-        buttons.append([InlineKeyboardButton("💰 Mais Barato (qualquer)", callback_data="ref_any")])
-
-        # Botao de copiar localizacao (se disponivel)
-        if localizacao:
-            buttons.append([InlineKeyboardButton(f"📋 Copiar: {localizacao}", callback_data=f"copy_{localizacao}")])
-
-        return InlineKeyboardMarkup(buttons)
+        return InlineKeyboardMarkup(buttons) if buttons else None
 
     def _parse_refinement_from_query(self, item_name: str) -> tuple[str, Optional[int]]:
         """
@@ -155,9 +155,6 @@ class TelegramBot:
             # Busca informacoes do item
             result = self.scraper.search_item(nome_busca)
 
-            # Armazena no context.user_data
-            context.user_data['last_search'] = result
-
             # Deleta mensagem de status
             await status_msg.delete()
 
@@ -169,8 +166,10 @@ class TelegramBot:
                     if result.preco_medio:
                         response += f"\n\n📊 *Media 45d:* {result.preco_medio} zenys"
 
-                    keyboard = self._create_refinement_keyboard(result, oferta.localizacao)
-                    await update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
+                    keyboard = self._create_refinement_keyboard(result)
+                    sent_msg = await update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
+                    # Armazena resultado pelo ID da mensagem
+                    context.user_data[f'search_{sent_msg.message_id}'] = result
                 else:
                     await update.message.reply_text(
                         f"❌ Nenhum '{nome_busca}' com refinamento +{ref_especifico} encontrado.\n\n"
@@ -194,13 +193,14 @@ class TelegramBot:
                 if result.preco_medio:
                     response += f"\n📊 *Media 45d:* {result.preco_medio} zenys"
 
-                localizacao = mais_barato.localizacao if mais_barato else ""
-                keyboard = self._create_refinement_keyboard(result, localizacao)
-                await update.message.reply_text(
+                keyboard = self._create_refinement_keyboard(result)
+                sent_msg = await update.message.reply_text(
                     response,
                     reply_markup=keyboard,
                     parse_mode='Markdown'
                 )
+                # Armazena resultado pelo ID da mensagem
+                context.user_data[f'search_{sent_msg.message_id}'] = result
 
             logger.info(f"Busca de '{nome_busca}' concluida com sucesso")
 
@@ -237,29 +237,26 @@ class TelegramBot:
 
         await query.answer()
 
-        # Recupera busca do context.user_data
-        result = context.user_data.get('last_search')
+        # Recupera busca pelo ID da mensagem
+        message_id = query.message.message_id
+        result = context.user_data.get(f'search_{message_id}')
         if not result:
             await query.edit_message_text(
                 "❌ Busca expirada. Por favor, faca uma nova busca."
             )
             return
 
-        # Extrai refinamento do callback: ref_0, ref_7, ref_any
+        # Extrai refinamento do callback: ref_0, ref_7, etc
         data = query.data
         refino_str = data.replace("ref_", "")
 
-        if refino_str == "any":
+        try:
+            refino = int(refino_str)
+            oferta = result.mais_barato(refino)
+            faixa_texto = f"+{refino}" if refino > 0 else "+0 (sem refino)"
+        except ValueError:
             oferta = result.mais_barato()
-            faixa_texto = "qualquer refinamento"
-        else:
-            try:
-                refino = int(refino_str)
-                oferta = result.mais_barato(refino)
-                faixa_texto = f"+{refino}" if refino > 0 else "+0 (sem refino)"
-            except ValueError:
-                oferta = result.mais_barato()
-                faixa_texto = "geral"
+            faixa_texto = "geral"
 
         if oferta:
             response = f"🔍 *{result.item_nome}* ({faixa_texto})\n\n"
@@ -268,30 +265,19 @@ class TelegramBot:
             if result.preco_medio:
                 response += f"\n\n📊 *Media 45d:* {result.preco_medio} zenys"
 
-            keyboard = self._create_refinement_keyboard(result, oferta.localizacao)
+            keyboard = self._create_refinement_keyboard(result)
             await query.edit_message_text(
                 response,
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
         else:
+            keyboard = self._create_refinement_keyboard(result)
             await query.edit_message_text(
                 f"❌ Nenhuma oferta encontrada para {faixa_texto}.\n\n"
-                f"Refinamentos disponiveis: {', '.join(f'+{r}' for r in result.refinamentos_disponiveis())}"
+                f"Refinamentos disponiveis: {', '.join(f'+{r}' for r in result.refinamentos_disponiveis())}",
+                reply_markup=keyboard
             )
-
-    async def handle_copy_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handler para callback do botao de copiar localizacao"""
-        query = update.callback_query
-
-        # Extrai localizacao do callback: copy_@market 123/456
-        data = query.data
-        localizacao = data.replace("copy_", "")
-
-        if localizacao:
-            await query.answer(f"📋 {localizacao}", show_alert=True)
-        else:
-            await query.answer("❌ Localizacao nao encontrada")
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler de erros globais"""
@@ -307,7 +293,6 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CallbackQueryHandler(self.handle_refinement_callback, pattern="^ref_"))
-        self.app.add_handler(CallbackQueryHandler(self.handle_copy_callback, pattern="^copy_"))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
