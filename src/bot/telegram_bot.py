@@ -210,9 +210,15 @@ class TelegramBot:
             "/start - Inicia o bot\n"
             "/help - Mostra esta mensagem\n\n"
             "*Comandos de monitoramento:*\n"
-            f"/monitor <item> <minutos> - Monitora item (min {MIN_INTERVAL_MINUTES}min)\n"
+            f"`/monitor <item>, <min>[, alertas]`\n"
             "/lista - Lista itens monitorados\n"
             "/remover <item> - Remove monitoramento\n\n"
+            "*Exemplos de monitoramento:*\n"
+            "• `/monitor manto, 30` - simples\n"
+            "• `/monitor +10 vestido, 15, -50%` - alerta queda\n"
+            "• `/monitor cajado, 15, +30%` - alerta subida\n"
+            "• `/monitor anel, 20, -20%, +50%` - ambos\n"
+            "• `/monitor item, 15, 100000000` - preco alvo\n\n"
             "*Limites:*\n"
             f"⚠️ Max 5 buscas/min | Max {MAX_ITEMS_PER_USER} itens monitorados"
         )
@@ -571,40 +577,112 @@ class TelegramBot:
             parse_mode='Markdown'
         )
 
+    def _parse_monitor_args(self, text: str) -> tuple[Optional[str], Optional[int], Optional[float], Optional[float], Optional[int], Optional[str]]:
+        """
+        Parseia argumentos do comando /monitor
+
+        Formato: /monitor <item>, <minutos>[, <alertas>]
+        Alertas podem ser: -50% (queda), +30% (subida), 150000000 (preço alvo)
+        Pode ter múltiplos alertas separados por vírgula
+
+        Returns:
+            tuple: (item_name, interval, alert_drop, alert_rise, alert_target, error_msg)
+        """
+        # Remove o comando /monitor do início se presente
+        if text.startswith('/monitor'):
+            text = text[8:].strip()
+
+        if not text:
+            return None, None, None, None, None, "Argumentos não fornecidos"
+
+        # Divide por vírgulas
+        parts = [p.strip() for p in text.split(',')]
+
+        if len(parts) < 2:
+            return None, None, None, None, None, "Formato inválido. Use: /monitor <item>, <minutos>[, <alertas>]"
+
+        item_name = parts[0].strip()
+        if not item_name:
+            return None, None, None, None, None, "Nome do item não pode estar vazio"
+
+        # Segundo parâmetro é o intervalo
+        try:
+            interval = int(parts[1].strip())
+        except ValueError:
+            return None, None, None, None, None, f"Intervalo inválido: '{parts[1]}'. Deve ser um número em minutos."
+
+        # Parâmetros opcionais de alerta
+        alert_drop = None
+        alert_rise = None
+        alert_target = None
+
+        for part in parts[2:]:
+            part = part.strip()
+            if not part:
+                continue
+
+            # Alerta de queda: -50% ou -50
+            if part.startswith('-'):
+                try:
+                    value = part[1:].replace('%', '').strip()
+                    alert_drop = float(value)
+                    if alert_drop <= 0 or alert_drop > 100:
+                        return None, None, None, None, None, f"Percentual de queda inválido: {part}. Use valores entre 1 e 100."
+                except ValueError:
+                    return None, None, None, None, None, f"Valor de alerta inválido: {part}"
+
+            # Alerta de subida: +30% ou +30
+            elif part.startswith('+'):
+                try:
+                    value = part[1:].replace('%', '').strip()
+                    alert_rise = float(value)
+                    if alert_rise <= 0:
+                        return None, None, None, None, None, f"Percentual de subida inválido: {part}. Use valores positivos."
+                except ValueError:
+                    return None, None, None, None, None, f"Valor de alerta inválido: {part}"
+
+            # Alerta de preço alvo (número absoluto)
+            else:
+                try:
+                    alert_target = int(part.replace('.', '').replace(',', ''))
+                    if alert_target <= 0:
+                        return None, None, None, None, None, f"Preço alvo inválido: {part}. Use valores positivos."
+                except ValueError:
+                    return None, None, None, None, None, f"Valor de alerta inválido: {part}"
+
+        return item_name, interval, alert_drop, alert_rise, alert_target, None
+
     async def monitor_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handler do comando /monitor <item> <minutos>"""
+        """Handler do comando /monitor <item>, <minutos>[, <alertas>]"""
         user = update.effective_user
         chat_id = update.effective_chat.id
 
         logger.info(f"Comando /monitor recebido de {user.username} (ID: {user.id})")
 
-        # Verifica argumentos
-        if not context.args or len(context.args) < 2:
+        # Pega o texto completo após o comando
+        full_text = update.message.text
+
+        # Parseia os argumentos
+        item_name, interval, alert_drop, alert_rise, alert_target, error = self._parse_monitor_args(full_text)
+
+        if error:
             await update.message.reply_text(
-                "❌ *Uso correto:*\n"
-                f"`/monitor <nome do item> <minutos>`\n\n"
-                f"*Exemplo:*\n"
-                f"`/monitor folha afiada 30`\n\n"
+                f"❌ {error}\n\n"
+                "*Uso correto:*\n"
+                "`/monitor <item>, <minutos>[, <alertas>]`\n\n"
+                "*Exemplos:*\n"
+                "`/monitor manto da bruxa, 30`\n"
+                "`/monitor +10 vestido da bruxa, 15, -50%`\n"
+                "`/monitor cajado corrompido, 15, +30%, -20%`\n"
+                "`/monitor anel temporal, 20, 150000000`\n\n"
+                "*Alertas disponiveis:*\n"
+                "• `-X%` - Alerta quando cair X% do preco base\n"
+                "• `+X%` - Alerta quando subir X% do preco base\n"
+                "• `valor` - Alerta quando chegar no preco alvo\n\n"
                 f"⏱️ Intervalo minimo: {MIN_INTERVAL_MINUTES} minutos\n"
                 f"📦 Maximo de itens: {MAX_ITEMS_PER_USER}",
                 parse_mode='Markdown'
             )
-            return
-
-        # Extrai intervalo (ultimo argumento)
-        try:
-            interval = int(context.args[-1])
-            item_name = ' '.join(context.args[:-1])
-        except ValueError:
-            await update.message.reply_text(
-                "❌ O ultimo argumento deve ser o intervalo em minutos.\n\n"
-                "*Exemplo:* `/monitor folha afiada 30`",
-                parse_mode='Markdown'
-            )
-            return
-
-        if not item_name:
-            await update.message.reply_text("❌ Nome do item nao pode estar vazio.")
             return
 
         # Mensagem de processamento
@@ -618,7 +696,10 @@ class TelegramBot:
             user_id=user.id,
             chat_id=chat_id,
             item_name=item_name,
-            interval_minutes=interval
+            interval_minutes=interval,
+            alert_drop_percent=alert_drop,
+            alert_rise_percent=alert_rise,
+            alert_target_price=alert_target
         )
 
         await status_msg.delete()
@@ -630,7 +711,7 @@ class TelegramBot:
                 parse_mode='Markdown'
             )
         else:
-            await update.message.reply_text(f"❌ {message}")
+            await update.message.reply_text(f"❌ {message}", parse_mode='Markdown')
 
     async def lista_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler do comando /lista - lista itens monitorados"""
@@ -643,7 +724,7 @@ class TelegramBot:
         if not items:
             await update.message.reply_text(
                 "📭 Voce nao tem itens monitorados.\n\n"
-                f"Use `/monitor <item> <minutos>` para adicionar.",
+                f"Use `/monitor <item>, <minutos>` para adicionar.",
                 parse_mode='Markdown'
             )
             return
@@ -651,11 +732,16 @@ class TelegramBot:
         response = "📋 *Itens Monitorados:*\n\n"
         for i, item in enumerate(items, 1):
             preco_str = f"{item.last_price:,}z".replace(",", ".") if item.last_price else "N/A"
+            base_str = f"{item.base_price:,}z".replace(",", ".") if item.base_price else "N/A"
             response += (
                 f"{i}. *{item.item_name}*\n"
                 f"   ⏱️ A cada {item.interval_minutes} min\n"
-                f"   💰 Ultimo preco: {preco_str}\n\n"
+                f"   💰 Preco atual: {preco_str}\n"
+                f"   📍 Preco base: {base_str}\n"
             )
+            if item.has_alerts_configured():
+                response += f"   🔔 {item.alerts_summary()}\n"
+            response += "\n"
 
         response += f"_Total: {len(items)}/{MAX_ITEMS_PER_USER} itens_"
 

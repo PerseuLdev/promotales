@@ -17,6 +17,15 @@ class MonitoredItem:
     last_search: Optional[str] = None
     created_at: Optional[str] = None
     active: bool = True
+    # Alertas de preço
+    base_price: Optional[int] = None  # Preço base para calcular porcentagens
+    alert_drop_percent: Optional[float] = None  # Alerta quando cair X% (ex: 50 = -50%)
+    alert_rise_percent: Optional[float] = None  # Alerta quando subir X% (ex: 30 = +30%)
+    alert_target_price: Optional[int] = None  # Alerta quando chegar no valor X
+    # Controle de alertas já disparados
+    alert_drop_triggered: bool = False
+    alert_rise_triggered: bool = False
+    alert_target_triggered: bool = False
 
     def __post_init__(self):
         if self.created_at is None:
@@ -49,6 +58,104 @@ class MonitoredItem:
             return False  # Primeira busca, não notifica
 
         return old_price != new_price
+
+    def check_alerts(self, new_price: int) -> List[str]:
+        """
+        Verifica se algum alerta foi acionado
+
+        Args:
+            new_price: Novo preço encontrado
+
+        Returns:
+            List[str]: Lista de mensagens de alerta (pode ser vazia)
+        """
+        alerts = []
+
+        if self.base_price is None or self.base_price == 0:
+            return alerts
+
+        # Calcula variação percentual em relação ao preço base
+        percent_change = ((new_price - self.base_price) / self.base_price) * 100
+
+        # Alerta de queda
+        if self.alert_drop_percent is not None and not self.alert_drop_triggered:
+            if percent_change <= -self.alert_drop_percent:
+                self.alert_drop_triggered = True
+                alerts.append(self._format_drop_alert(new_price, percent_change))
+
+        # Alerta de subida
+        if self.alert_rise_percent is not None and not self.alert_rise_triggered:
+            if percent_change >= self.alert_rise_percent:
+                self.alert_rise_triggered = True
+                alerts.append(self._format_rise_alert(new_price, percent_change))
+
+        # Alerta de preço alvo
+        if self.alert_target_price is not None and not self.alert_target_triggered:
+            if new_price <= self.alert_target_price:
+                self.alert_target_triggered = True
+                alerts.append(self._format_target_alert(new_price))
+
+        return alerts
+
+    def _format_drop_alert(self, new_price: int, percent_change: float) -> str:
+        """Formata mensagem de alerta de queda"""
+        return (
+            f"🔔 *Alerta de Queda Atingido!*\n\n"
+            f"Item: *{self.item_name}*\n"
+            f"📉 Caiu *{abs(percent_change):.1f}%* do preço base!\n\n"
+            f"Preço base: {self.base_price:,}z\n"
+            f"Preço atual: {new_price:,}z\n"
+            f"Meta: -{self.alert_drop_percent}%"
+        ).replace(",", ".")
+
+    def _format_rise_alert(self, new_price: int, percent_change: float) -> str:
+        """Formata mensagem de alerta de subida"""
+        return (
+            f"🔔 *Alerta de Subida Atingido!*\n\n"
+            f"Item: *{self.item_name}*\n"
+            f"📈 Subiu *{percent_change:.1f}%* do preço base!\n\n"
+            f"Preço base: {self.base_price:,}z\n"
+            f"Preço atual: {new_price:,}z\n"
+            f"Meta: +{self.alert_rise_percent}%"
+        ).replace(",", ".")
+
+    def _format_target_alert(self, new_price: int) -> str:
+        """Formata mensagem de alerta de preço alvo"""
+        return (
+            f"🎯 *Preço Alvo Atingido!*\n\n"
+            f"Item: *{self.item_name}*\n"
+            f"O preço chegou em *{new_price:,}z*!\n\n"
+            f"Preço base: {self.base_price:,}z\n"
+            f"Meta: {self.alert_target_price:,}z"
+        ).replace(",", ".")
+
+    def reset_alerts(self) -> None:
+        """Reseta os flags de alertas disparados (para permitir novos alertas)"""
+        self.alert_drop_triggered = False
+        self.alert_rise_triggered = False
+        self.alert_target_triggered = False
+
+    def has_alerts_configured(self) -> bool:
+        """Verifica se tem algum alerta configurado"""
+        return (
+            self.alert_drop_percent is not None or
+            self.alert_rise_percent is not None or
+            self.alert_target_price is not None
+        )
+
+    def alerts_summary(self) -> str:
+        """Retorna resumo dos alertas configurados"""
+        parts = []
+        if self.alert_drop_percent is not None:
+            status = "✅" if self.alert_drop_triggered else "⏳"
+            parts.append(f"{status} Queda -{self.alert_drop_percent}%")
+        if self.alert_rise_percent is not None:
+            status = "✅" if self.alert_rise_triggered else "⏳"
+            parts.append(f"{status} Subida +{self.alert_rise_percent}%")
+        if self.alert_target_price is not None:
+            status = "✅" if self.alert_target_triggered else "⏳"
+            parts.append(f"{status} Alvo {self.alert_target_price:,}z".replace(",", "."))
+        return " | ".join(parts) if parts else "Sem alertas"
 
     def price_change_message(self, old_price: int, new_price: int) -> str:
         """

@@ -1,6 +1,6 @@
 """Serviço de monitoramento de preços"""
 
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from datetime import timedelta
 from telegram.ext import Application, ContextTypes
 
@@ -12,7 +12,7 @@ from ..utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Configurações
-MIN_INTERVAL_MINUTES = 15
+MIN_INTERVAL_MINUTES = 5
 MAX_ITEMS_PER_USER = 10
 
 
@@ -34,7 +34,10 @@ class MonitorService:
         user_id: int,
         chat_id: int,
         item_name: str,
-        interval_minutes: int
+        interval_minutes: int,
+        alert_drop_percent: Optional[float] = None,
+        alert_rise_percent: Optional[float] = None,
+        alert_target_price: Optional[int] = None
     ) -> tuple[bool, str]:
         """
         Adiciona item para monitoramento
@@ -45,6 +48,9 @@ class MonitorService:
             chat_id: ID do chat para notificações
             item_name: Nome do item
             interval_minutes: Intervalo em minutos
+            alert_drop_percent: Alerta quando cair X% (ex: 50 = -50%)
+            alert_rise_percent: Alerta quando subir X% (ex: 30 = +30%)
+            alert_target_price: Alerta quando chegar no valor X
 
         Returns:
             tuple: (sucesso, mensagem)
@@ -66,7 +72,10 @@ class MonitorService:
         item = MonitoredItem(
             user_id=user_id,
             item_name=item_name,
-            interval_minutes=interval_minutes
+            interval_minutes=interval_minutes,
+            alert_drop_percent=alert_drop_percent,
+            alert_rise_percent=alert_rise_percent,
+            alert_target_price=alert_target_price
         )
 
         # Faz primeira busca para validar o item
@@ -80,6 +89,7 @@ class MonitorService:
                 mais_barato = result.mais_barato()
                 if mais_barato:
                     item.last_price = mais_barato.preco
+                    item.base_price = mais_barato.preco  # Preço base para alertas
 
         except ItemNotFoundException:
             return False, f"Item '{item_name}' não encontrado no market"
@@ -94,7 +104,15 @@ class MonitorService:
         self._schedule_job(application, item, chat_id)
 
         logger.info(f"Monitoramento adicionado: {item_name} a cada {interval_minutes}min para usuário {user_id}")
-        return True, f"Monitorando '{item_name}' a cada {interval_minutes} minutos\nPreço atual: {item.last_price:,}z".replace(",", ".")
+
+        # Monta mensagem de resposta
+        response = f"Monitorando '*{item_name}*' a cada {interval_minutes} minutos\n"
+        response += f"💰 Preço base: {item.last_price:,}z\n".replace(",", ".")
+
+        if item.has_alerts_configured():
+            response += f"\n🔔 Alertas: {item.alerts_summary()}"
+
+        return True, response
 
     def _schedule_job(self, application: Application, item: MonitoredItem, chat_id: int) -> None:
         """Agenda job de monitoramento"""
@@ -160,12 +178,22 @@ class MonitorService:
                 if mais_barato:
                     new_price = mais_barato.preco
 
-                    # Verifica se preço mudou
+                    # Verifica alertas configurados (antes de atualizar o preço)
+                    alert_messages = item.check_alerts(new_price)
+                    for alert_msg in alert_messages:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=alert_msg,
+                            parse_mode='Markdown'
+                        )
+                        logger.info(f"Alerta enviado para '{item_name}'")
+
+                    # Verifica se preço mudou (notificação padrão)
                     if item.update_price(new_price):
                         # Salva atualização
                         self.storage.update(item)
 
-                        # Envia notificação
+                        # Envia notificação de mudança de preço
                         message = item.price_change_message(old_price, new_price)
                         await context.bot.send_message(
                             chat_id=chat_id,
@@ -174,7 +202,7 @@ class MonitorService:
                         )
                         logger.info(f"Notificação enviada: {item_name} mudou de {old_price} para {new_price}")
                     else:
-                        # Apenas atualiza timestamp
+                        # Apenas atualiza timestamp e salva alertas disparados
                         self.storage.update(item)
                         logger.debug(f"Preço de '{item_name}' não mudou: {new_price}")
 
