@@ -25,9 +25,17 @@ logger = get_logger(__name__)
 class RagnatalesScraper:
     """Classe para scraping de informacoes do Ragnatales"""
 
-    def __init__(self) -> None:
-        """Inicializa o scraper"""
-        self.page: Optional[ChromiumPage] = None
+    def __init__(self, browser: Optional[ChromiumPage] = None) -> None:
+        """
+        Inicializa o scraper.
+
+        Args:
+            browser: Instância externa do browser (opcional).
+                     Se fornecido, o scraper reutiliza este browser
+                     e NÃO o fecha ao finalizar.
+        """
+        self.page: Optional[ChromiumPage] = browser
+        self._external_browser: bool = browser is not None
 
     def _start_driver(self) -> None:
         """
@@ -45,15 +53,20 @@ class RagnatalesScraper:
                 raise BrowserException(f"Falha ao iniciar Browser: {str(e)}")
 
     def _stop_driver(self) -> None:
-        """Para o Browser se estiver rodando"""
+        """Para o Browser se estiver rodando e não for externo"""
         if self.page is not None:
-            try:
-                self.page.quit()
-                logger.info("Browser finalizado com sucesso")
-            except Exception as e:
-                logger.error(f"Erro ao finalizar Browser: {str(e)}")
-            finally:
+            if self._external_browser:
+                # Não fecha browser externo, apenas limpa referência
+                logger.debug("Browser externo - não será fechado pelo scraper")
                 self.page = None
+            else:
+                try:
+                    self.page.quit()
+                    logger.info("Browser finalizado com sucesso")
+                except Exception as e:
+                    logger.error(f"Erro ao finalizar Browser: {str(e)}")
+                finally:
+                    self.page = None
 
     def _search_item(self, item_name: str) -> bool:
         """

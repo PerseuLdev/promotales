@@ -10,12 +10,22 @@ load_dotenv()
 
 class Settings:
     """Classe de configurações do bot"""
-    
+
     # Telegram
     BOT_TOKEN: Optional[str] = os.getenv("BOT_TOKEN")
-    
+
     # Ambiente
     IS_RENDER: bool = bool(os.environ.get('RENDER'))
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production" if bool(os.environ.get('RENDER')) else "local")
+
+    # Cache
+    CACHE_TTL: int = int(os.getenv("CACHE_TTL", "300"))  # 5 minutos
+
+    # Browser Pool
+    BROWSER_POOL_SIZE: int = int(os.getenv("BROWSER_POOL_SIZE", "1"))
+
+    # Job Queue
+    MAX_QUEUE_SIZE: int = int(os.getenv("MAX_QUEUE_SIZE", "10"))
     
     # Chrome
     CHROME_BINARY_LOCAL: str = r"C:\Program Files\Google\Chrome\Application\chrome.exe"

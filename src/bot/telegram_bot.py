@@ -1,6 +1,7 @@
 """Bot do Telegram para o PromoTales"""
 
 import re
+import asyncio
 from typing import Optional, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -17,6 +18,10 @@ from ..config.settings import Settings
 from ..scraper.ragnatales_scraper import RagnatalesScraper
 from ..models.item_offer import ItemSearchResult
 from ..services.monitor_service import MonitorService, MIN_INTERVAL_MINUTES, MAX_ITEMS_PER_USER
+from ..services.cache_service import MemoryCache
+from ..services.browser_pool import get_browser_manager, BrowserManager
+from ..services.job_queue import LocalJobQueue, SearchJob, JobStatus
+from ..services.search_worker import SearchWorker
 from ..exceptions import (
     InvalidItemNameException,
     RateLimitExceededException,
@@ -36,9 +41,143 @@ class TelegramBot:
     def __init__(self) -> None:
         """Inicializa o bot"""
         Settings.validate()
-        self.scraper: RagnatalesScraper = RagnatalesScraper()
         self.monitor_service: MonitorService = MonitorService()
         self.app: Optional[Application] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # Cache e Browser Pool
+        self.cache: MemoryCache = MemoryCache(default_ttl=Settings.CACHE_TTL)
+        self.browser_manager: BrowserManager = get_browser_manager()
+
+        # Job Queue e Worker
+        self.job_queue: LocalJobQueue = LocalJobQueue(max_size=Settings.MAX_QUEUE_SIZE)
+        self.worker: SearchWorker = SearchWorker(
+            job_queue=self.job_queue,
+            cache=self.cache,
+            browser_manager=self.browser_manager,
+            result_callback=self._on_job_completed
+        )
+
+        # Mapa de jobs pendentes: job_id -> (chat_id, message_id, user_data_key)
+        self._pending_jobs: Dict[str, tuple] = {}
+
+        logger.info(f"Cache inicializado (TTL: {Settings.CACHE_TTL}s)")
+        logger.info(f"BrowserManager inicializado")
+        logger.info(f"JobQueue inicializada (max_size: {Settings.MAX_QUEUE_SIZE})")
+
+    def _on_job_completed(self, job: SearchJob) -> None:
+        """
+        Callback chamado pelo worker quando um job termina.
+        Executa em thread separada, então usa asyncio para comunicar com o bot.
+        """
+        if self._loop is None:
+            logger.warning("Event loop não disponível para callback")
+            return
+
+        # Agenda a coroutine no event loop do bot
+        asyncio.run_coroutine_threadsafe(
+            self._handle_job_result(job),
+            self._loop
+        )
+
+    async def _handle_job_result(self, job: SearchJob) -> None:
+        """Processa resultado de um job e atualiza a mensagem do Telegram."""
+        job_info = self._pending_jobs.pop(job.job_id, None)
+        if not job_info:
+            logger.warning(f"Job {job.job_id} não encontrado em pending_jobs")
+            return
+
+        chat_id, message_id, user_data_key, ref_especifico = job_info
+
+        try:
+            if job.status == JobStatus.COMPLETED and job.result:
+                result = job.result
+                await self._send_search_result(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    result=result,
+                    ref_especifico=ref_especifico,
+                    user_data_key=user_data_key
+                )
+            elif job.status == JobStatus.FAILED:
+                error_msg = job.error or "Erro desconhecido"
+                await self.app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=f"❌ {error_msg}"
+                )
+            else:
+                await self.app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text="❌ A busca foi cancelada."
+                )
+        except Exception as e:
+            logger.error(f"Erro ao processar resultado do job {job.job_id}: {e}")
+
+    async def _send_search_result(
+        self,
+        chat_id: int,
+        message_id: int,
+        result: ItemSearchResult,
+        ref_especifico: Optional[int],
+        user_data_key: str
+    ) -> None:
+        """Envia/edita mensagem com resultado da busca."""
+        # Armazena resultado para callbacks (usa application.bot_data como storage global)
+        self.app.bot_data[user_data_key] = result
+
+        if ref_especifico is not None:
+            oferta = result.mais_barato(ref_especifico)
+            if oferta:
+                response = oferta.to_message(mostrar_detalhes=True)
+                if result.preco_medio:
+                    response += f"\n\n📊 *Media 45d:* {result.preco_medio} zenys"
+
+                keyboard = self._create_refinement_keyboard(result)
+                await self.app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=response,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+            else:
+                refinos_disp = ', '.join(f'+{r}' for r in result.refinamentos_disponiveis())
+                await self.app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=f"❌ Nenhum '{result.item_nome}' com refinamento +{ref_especifico} encontrado.\n\n"
+                         f"Refinamentos disponiveis: {refinos_disp}"
+                )
+        else:
+            # Mostra resumo com botoes
+            mais_barato = result.mais_barato()
+            response = result.resumo()
+
+            # Se tem cartas ou bonus, mostra detalhes do mais barato
+            if mais_barato and (mais_barato.cartas or mais_barato.bonus_aleatorios):
+                response += "\n\n📦 *Detalhes do mais barato:*\n"
+                if mais_barato.cartas:
+                    response += f"💎 Cartas: {', '.join(mais_barato.cartas)}\n"
+                if mais_barato.bonus_aleatorios:
+                    for bonus in mais_barato.bonus_aleatorios:
+                        response += f"✨ {bonus}\n"
+
+            # Media no final
+            if result.preco_medio:
+                response += f"\n📊 *Media 45d:* {result.preco_medio} zenys"
+
+            keyboard = self._create_refinement_keyboard(result)
+            await self.app.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=response,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+        logger.info(f"Resultado enviado para chat {chat_id}")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler do comando /start"""
@@ -138,6 +277,7 @@ class TelegramBot:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler de mensagens de texto (busca de itens)"""
         user = update.effective_user
+        chat_id = update.effective_chat.id
         item_name = update.message.text.strip()
 
         logger.info(f"Busca de item '{item_name}' solicitada por {user.username} (ID: {user.id})")
@@ -154,64 +294,60 @@ class TelegramBot:
 
             logger.info(f"Nome: '{nome_busca}', Refinamento: {ref_especifico}")
 
-            # Mensagem de processamento
+            # Verifica cache primeiro (retorno imediato se encontrado)
+            cache_key = nome_busca
+            cached_result = self.cache.get(cache_key)
+
+            if cached_result:
+                logger.info(f"Cache HIT para '{nome_busca}'")
+                # Retorno imediato do cache
+                await self._send_cached_result(
+                    update=update,
+                    context=context,
+                    result=cached_result,
+                    ref_especifico=ref_especifico
+                )
+                return
+
+            # Cache MISS - enfileira job para processamento em background
+            logger.info(f"Cache MISS para '{nome_busca}', enfileirando job...")
+
+            # Mensagem de processamento (será editada quando o resultado chegar)
             remaining = global_rate_limiter.get_remaining_requests(user.id)
-            status_msg = await update.message.reply_text(
-                f"🔎 Buscando informacoes...\n"
-                f"📊 Buscas restantes: {remaining}/{global_rate_limiter.max_requests}"
+            pending_jobs = self.job_queue.pending_count
+
+            status_text = f"🔎 Buscando '{nome_busca}'...\n"
+            if pending_jobs > 0:
+                status_text += f"📋 Posicao na fila: {pending_jobs + 1}\n"
+            status_text += f"📊 Buscas restantes: {remaining}/{global_rate_limiter.max_requests}"
+
+            status_msg = await update.message.reply_text(status_text)
+
+            # Cria job
+            job = SearchJob(
+                item_name=nome_busca,
+                chat_id=chat_id,
+                user_id=user.id,
+                message_id=status_msg.message_id,
+                refinamento=ref_especifico
             )
 
-            # Busca informacoes do item
-            result = self.scraper.search_item(nome_busca)
+            # Chave para armazenar resultado (para callbacks de refinamento)
+            user_data_key = f'search_{status_msg.message_id}'
 
-            # Deleta mensagem de status
-            await status_msg.delete()
+            # Registra job pendente
+            self._pending_jobs[job.job_id] = (chat_id, status_msg.message_id, user_data_key, ref_especifico)
 
-            # Se especificou refinamento, mostra direto
-            if ref_especifico is not None:
-                oferta = result.mais_barato(ref_especifico)
-                if oferta:
-                    response = oferta.to_message(mostrar_detalhes=True)
-                    if result.preco_medio:
-                        response += f"\n\n📊 *Media 45d:* {result.preco_medio} zenys"
-
-                    keyboard = self._create_refinement_keyboard(result)
-                    sent_msg = await update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
-                    # Armazena resultado pelo ID da mensagem
-                    context.user_data[f'search_{sent_msg.message_id}'] = result
-                else:
-                    await update.message.reply_text(
-                        f"❌ Nenhum '{nome_busca}' com refinamento +{ref_especifico} encontrado.\n\n"
-                        f"Refinamentos disponiveis: {', '.join(f'+{r}' for r in result.refinamentos_disponiveis())}"
-                    )
-            else:
-                # Mostra resumo com botoes
-                mais_barato = result.mais_barato()
-                response = result.resumo()
-
-                # Se tem cartas ou bonus, mostra detalhes do mais barato
-                if mais_barato and (mais_barato.cartas or mais_barato.bonus_aleatorios):
-                    response += "\n\n📦 *Detalhes do mais barato:*\n"
-                    if mais_barato.cartas:
-                        response += f"💎 Cartas: {', '.join(mais_barato.cartas)}\n"
-                    if mais_barato.bonus_aleatorios:
-                        for bonus in mais_barato.bonus_aleatorios:
-                            response += f"✨ {bonus}\n"
-
-                # Media no final
-                if result.preco_medio:
-                    response += f"\n📊 *Media 45d:* {result.preco_medio} zenys"
-
-                keyboard = self._create_refinement_keyboard(result)
-                sent_msg = await update.message.reply_text(
-                    response,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
+            # Enfileira job
+            if not self.job_queue.enqueue(job):
+                # Fila cheia
+                del self._pending_jobs[job.job_id]
+                await status_msg.edit_text(
+                    "❌ Servidor ocupado. Por favor, tente novamente em alguns segundos."
                 )
-                # Armazena resultado pelo ID da mensagem
-                context.user_data[f'search_{sent_msg.message_id}'] = result
+                return
 
-            logger.info(f"Busca de '{nome_busca}' concluida com sucesso")
+            logger.info(f"Job {job.job_id} enfileirado para '{nome_busca}'")
 
         except RateLimitExceededException as e:
             error_msg = (
@@ -226,19 +362,81 @@ class TelegramBot:
             logger.warning(f"Nome de item invalido: '{item_name}' - {e.reason}")
             await update.message.reply_text(error_msg)
 
-        except ItemNotFoundException as e:
-            logger.info(f"Item nao encontrado: '{e.item_name}'")
-            await update.message.reply_text(e.message)
-
-        except PromoTalesException as e:
-            error_msg = f"❌ {e.message}"
-            logger.error(f"Erro PromoTales: {str(e)}")
-            await update.message.reply_text(error_msg)
-
         except Exception as e:
             error_msg = f"❌ Erro inesperado ao buscar '{item_name}'. Tente novamente mais tarde."
             logger.error(f"Erro nao tratado ao processar busca: {str(e)}", exc_info=True)
             await update.message.reply_text(error_msg)
+
+    async def _send_cached_result(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        result: ItemSearchResult,
+        ref_especifico: Optional[int]
+    ) -> None:
+        """Envia resultado do cache imediatamente (sem passar pela fila)."""
+        if ref_especifico is not None:
+            oferta = result.mais_barato(ref_especifico)
+            if oferta:
+                response = oferta.to_message(mostrar_detalhes=True)
+                if result.preco_medio:
+                    response += f"\n\n📊 *Media 45d:* {result.preco_medio} zenys"
+
+                keyboard = self._create_refinement_keyboard(result)
+                sent_msg = await update.message.reply_text(
+                    response,
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+                context.user_data[f'search_{sent_msg.message_id}'] = result
+            else:
+                refinos_disp = ', '.join(f'+{r}' for r in result.refinamentos_disponiveis())
+                await update.message.reply_text(
+                    f"❌ Nenhum '{result.item_nome}' com refinamento +{ref_especifico} encontrado.\n\n"
+                    f"Refinamentos disponiveis: {refinos_disp}"
+                )
+        else:
+            # Mostra resumo com botoes
+            mais_barato = result.mais_barato()
+            response = result.resumo()
+
+            # Se tem cartas ou bonus, mostra detalhes do mais barato
+            if mais_barato and (mais_barato.cartas or mais_barato.bonus_aleatorios):
+                response += "\n\n📦 *Detalhes do mais barato:*\n"
+                if mais_barato.cartas:
+                    response += f"💎 Cartas: {', '.join(mais_barato.cartas)}\n"
+                if mais_barato.bonus_aleatorios:
+                    for bonus in mais_barato.bonus_aleatorios:
+                        response += f"✨ {bonus}\n"
+
+            # Media no final
+            if result.preco_medio:
+                response += f"\n📊 *Media 45d:* {result.preco_medio} zenys"
+
+            keyboard = self._create_refinement_keyboard(result)
+            sent_msg = await update.message.reply_text(
+                response,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+            context.user_data[f'search_{sent_msg.message_id}'] = result
+
+        logger.info(f"Resultado do cache enviado para '{result.item_nome}'")
+
+    def _get_search_result(self, context: ContextTypes.DEFAULT_TYPE, message_id: int) -> Optional[ItemSearchResult]:
+        """
+        Busca resultado de busca em user_data ou bot_data.
+
+        Resultados de cache vão para user_data.
+        Resultados da fila vão para bot_data.
+        """
+        key = f'search_{message_id}'
+        # Tenta user_data primeiro (cache hit)
+        result = context.user_data.get(key)
+        if result:
+            return result
+        # Tenta bot_data (resultado da fila)
+        return context.bot_data.get(key)
 
     async def handle_refinement_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler para callbacks dos botoes de refinamento"""
@@ -248,7 +446,7 @@ class TelegramBot:
 
         # Recupera busca pelo ID da mensagem
         message_id = query.message.message_id
-        result = context.user_data.get(f'search_{message_id}')
+        result = self._get_search_result(context, message_id)
         if not result:
             await query.edit_message_text(
                 "❌ Busca expirada. Por favor, faca uma nova busca."
@@ -295,7 +493,7 @@ class TelegramBot:
 
         # Recupera busca pelo ID da mensagem
         message_id = query.message.message_id
-        result = context.user_data.get(f'search_{message_id}')
+        result = self._get_search_result(context, message_id)
 
         if not result:
             await query.edit_message_text(
@@ -341,7 +539,7 @@ class TelegramBot:
 
         # Recupera busca pelo ID da mensagem
         message_id = query.message.message_id
-        result = context.user_data.get(f'search_{message_id}')
+        result = self._get_search_result(context, message_id)
 
         if not result:
             await query.edit_message_text(
@@ -533,10 +731,44 @@ class TelegramBot:
         self.app.add_error_handler(self.error_handler)
         logger.info("Handlers configurados com sucesso")
 
+    async def shutdown(self) -> None:
+        """Cleanup ao encerrar o bot"""
+        logger.info("Iniciando shutdown...")
+
+        # Para o worker
+        if self.worker.is_running():
+            logger.info("Parando SearchWorker...")
+            worker_stats = self.worker.stats
+            logger.info(f"Worker stats finais: {worker_stats}")
+            self.worker.stop(timeout=10.0)
+
+        # Limpa cache
+        cache_stats = self.cache.stats()
+        logger.info(f"Cache stats finais: {cache_stats}")
+        self.cache.clear()
+
+        # Encerra browser
+        self.browser_manager.shutdown()
+
+        # Limpa pending jobs
+        self._pending_jobs.clear()
+
+        logger.info("Shutdown concluido")
+
+    async def _post_init(self, application: Application) -> None:
+        """Callback executado após inicialização do app (captura event loop)."""
+        self._loop = asyncio.get_running_loop()
+        self.worker.start()
+        logger.info("SearchWorker iniciado")
+
     def run(self) -> None:
         """Inicia o bot"""
         self.app = ApplicationBuilder().token(Settings.BOT_TOKEN).build()
         self.setup_handlers()
+
+        # Registra callbacks de ciclo de vida
+        self.app.post_init = self._post_init
+        self.app.post_shutdown = self.shutdown
 
         # Restaura jobs de monitoramento
         restored = self.monitor_service.restore_jobs(self.app)
@@ -548,6 +780,10 @@ class TelegramBot:
             logger.info("🚀 Bot rodando no Render (modo producao)")
         else:
             logger.info("🛠️ Bot rodando localmente (modo desenvolvimento)")
+
+        # Log de cache, browser e fila
+        logger.info(f"💾 Cache: TTL={Settings.CACHE_TTL}s | Ambiente: {Settings.ENVIRONMENT}")
+        logger.info(f"📋 Fila: max_size={Settings.MAX_QUEUE_SIZE}")
 
         logger.info("✅ Bot iniciado com sucesso. Aguardando mensagens...")
         self.app.run_polling()
