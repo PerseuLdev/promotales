@@ -888,7 +888,7 @@ class TelegramBot:
         self.app.add_error_handler(self.error_handler)
         logger.info("Handlers configurados com sucesso")
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, application: Application = None) -> None:
         """Cleanup ao encerrar o bot"""
         logger.info("Iniciando shutdown...")
 
