@@ -180,6 +180,72 @@ Otimizar o PromoTales Bot para diferentes ambientes com melhor performance e esc
 
 ---
 
+---
+
+## Fase 4: Sistema de Builds (Futuro)
+**Objetivo:** Permitir consulta de preços de builds completas
+
+### 4.1 Estrutura de Dados
+- [ ] Criar `data/builds/` diretório
+- [ ] Criar CSVs por classe (ex: `knight.csv`, `wizard.csv`)
+- [ ] Formato CSV: `build_name,phase,item1,item2,item3,...`
+  - `phase`: early, mid, end, high
+  - Items separados por vírgula
+
+### 4.2 Build Service
+- [ ] Criar `src/services/build_service.py`
+  - [ ] Classe `Build` (dataclass)
+  - [ ] Classe `BuildService`
+  - [ ] Método `list_classes()` - lista classes disponíveis
+  - [ ] Método `list_builds(class, phase)` - lista builds filtradas
+  - [ ] Método `get_build(build_name)` - retorna build específica
+  - [ ] Método `load_builds()` - carrega CSVs
+
+### 4.3 Comandos do Bot
+- [ ] `/build` - Lista todas as classes disponíveis
+- [ ] `/build <classe>` - Lista builds da classe
+- [ ] `/build <classe> <fase>` - Filtra por fase (early/mid/end/high)
+- [ ] Botões inline para navegação
+
+### 4.4 Consulta de Preços
+- [ ] Buscar preço de cada item da build
+- [ ] Usar cache para otimizar
+- [ ] Mostrar preço total da build
+- [ ] Mostrar itens não encontrados
+
+### 4.5 Formato de Resposta
+```
+🛡️ Build: Knight Tank End Game
+
+📦 Itens (5):
+• +9 Manto da Bruxa - 15.000.000z
+• +7 Botas Temporais - 8.500.000z
+• Anel Temporal [1] - 25.000.000z
+• Escudo Valquíria - 3.200.000z
+• Elmo de Odin - 12.000.000z
+
+💰 Total: 63.700.000z
+⏱️ Atualizado: agora
+```
+
+### 4.6 Exemplo de CSV
+```csv
+# data/builds/knight.csv
+build_name,phase,items
+Tank Básico,early,escudo buckler,espada,armadura de couro
+Tank Intermediário,mid,escudo valquíria,lança,manto da bruxa
+Tank End Game,end,+9 manto da bruxa,+7 botas temporais,anel temporal
+MVP Hunter,high,+12 lança das trevas,+10 armadura sagrada,anel celestial
+```
+
+### 4.7 Testes Fase 4
+- [ ] Testar carregamento de CSVs
+- [ ] Testar filtros por classe/fase
+- [ ] Testar consulta de preços em lote
+- [ ] Testar cache de builds
+
+---
+
 ## Progresso
 
 | Fase | Status | Completude |
@@ -187,5 +253,6 @@ Otimizar o PromoTales Bot para diferentes ambientes com melhor performance e esc
 | Fase 1 | ✅ Concluída | 100% |
 | Fase 2 | ✅ Concluída | 100% |
 | Fase 3 | ⏳ Pendente | 0% |
+| Fase 4 | 📋 Planejado | 0% |
 
 **Última atualização:** 2026-02-03
