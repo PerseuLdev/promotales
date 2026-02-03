@@ -5,6 +5,7 @@ from typing import Optional, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -15,6 +16,7 @@ from telegram.ext import (
 from ..config.settings import Settings
 from ..scraper.ragnatales_scraper import RagnatalesScraper
 from ..models.item_offer import ItemSearchResult
+from ..services.monitor_service import MonitorService, MIN_INTERVAL_MINUTES, MAX_ITEMS_PER_USER
 from ..exceptions import (
     InvalidItemNameException,
     RateLimitExceededException,
@@ -35,7 +37,8 @@ class TelegramBot:
         """Inicializa o bot"""
         Settings.validate()
         self.scraper: RagnatalesScraper = RagnatalesScraper()
-        self.app: Optional[ApplicationBuilder] = None
+        self.monitor_service: MonitorService = MonitorService()
+        self.app: Optional[Application] = None
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler do comando /start"""
@@ -64,13 +67,15 @@ class TelegramBot:
             "*Busca com refinamento:*\n"
             "• `+9 manto da bruxa` - busca direto +9\n"
             "• `manto da bruxa +7` - busca direto +7\n\n"
-            "*Botoes de refinamento:*\n"
-            "Mostra cada refino disponivel (+0, +4, +7, +9, etc)\n\n"
-            "*Comandos disponiveis:*\n"
+            "*Comandos de busca:*\n"
             "/start - Inicia o bot\n"
             "/help - Mostra esta mensagem\n\n"
+            "*Comandos de monitoramento:*\n"
+            f"/monitor <item> <minutos> - Monitora item (min {MIN_INTERVAL_MINUTES}min)\n"
+            "/lista - Lista itens monitorados\n"
+            "/remover <item> - Remove monitoramento\n\n"
             "*Limites:*\n"
-            "⚠️ Maximo de 5 buscas por minuto"
+            f"⚠️ Max 5 buscas/min | Max {MAX_ITEMS_PER_USER} itens monitorados"
         )
         await update.message.reply_text(help_message, parse_mode='Markdown')
 
@@ -368,6 +373,133 @@ class TelegramBot:
             parse_mode='Markdown'
         )
 
+    async def monitor_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler do comando /monitor <item> <minutos>"""
+        user = update.effective_user
+        chat_id = update.effective_chat.id
+
+        logger.info(f"Comando /monitor recebido de {user.username} (ID: {user.id})")
+
+        # Verifica argumentos
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text(
+                "❌ *Uso correto:*\n"
+                f"`/monitor <nome do item> <minutos>`\n\n"
+                f"*Exemplo:*\n"
+                f"`/monitor folha afiada 30`\n\n"
+                f"⏱️ Intervalo minimo: {MIN_INTERVAL_MINUTES} minutos\n"
+                f"📦 Maximo de itens: {MAX_ITEMS_PER_USER}",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Extrai intervalo (ultimo argumento)
+        try:
+            interval = int(context.args[-1])
+            item_name = ' '.join(context.args[:-1])
+        except ValueError:
+            await update.message.reply_text(
+                "❌ O ultimo argumento deve ser o intervalo em minutos.\n\n"
+                "*Exemplo:* `/monitor folha afiada 30`",
+                parse_mode='Markdown'
+            )
+            return
+
+        if not item_name:
+            await update.message.reply_text("❌ Nome do item nao pode estar vazio.")
+            return
+
+        # Mensagem de processamento
+        status_msg = await update.message.reply_text(
+            f"⏳ Configurando monitoramento de '{item_name}'..."
+        )
+
+        # Adiciona monitoramento
+        success, message = await self.monitor_service.add_monitor(
+            application=self.app,
+            user_id=user.id,
+            chat_id=chat_id,
+            item_name=item_name,
+            interval_minutes=interval
+        )
+
+        await status_msg.delete()
+
+        if success:
+            await update.message.reply_text(
+                f"✅ {message}\n\n"
+                f"Voce sera notificado quando o preco mudar.",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(f"❌ {message}")
+
+    async def lista_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler do comando /lista - lista itens monitorados"""
+        user = update.effective_user
+
+        logger.info(f"Comando /lista recebido de {user.username} (ID: {user.id})")
+
+        items = self.monitor_service.list_monitors(user.id)
+
+        if not items:
+            await update.message.reply_text(
+                "📭 Voce nao tem itens monitorados.\n\n"
+                f"Use `/monitor <item> <minutos>` para adicionar.",
+                parse_mode='Markdown'
+            )
+            return
+
+        response = "📋 *Itens Monitorados:*\n\n"
+        for i, item in enumerate(items, 1):
+            preco_str = f"{item.last_price:,}z".replace(",", ".") if item.last_price else "N/A"
+            response += (
+                f"{i}. *{item.item_name}*\n"
+                f"   ⏱️ A cada {item.interval_minutes} min\n"
+                f"   💰 Ultimo preco: {preco_str}\n\n"
+            )
+
+        response += f"_Total: {len(items)}/{MAX_ITEMS_PER_USER} itens_"
+
+        await update.message.reply_text(response, parse_mode='Markdown')
+
+    async def remover_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler do comando /remover <item>"""
+        user = update.effective_user
+
+        logger.info(f"Comando /remover recebido de {user.username} (ID: {user.id})")
+
+        if not context.args:
+            # Mostra lista para ajudar
+            items = self.monitor_service.list_monitors(user.id)
+            if items:
+                lista = '\n'.join(f"• `{item.item_name}`" for item in items)
+                await update.message.reply_text(
+                    "❌ *Uso correto:*\n"
+                    "`/remover <nome do item>`\n\n"
+                    "*Seus itens monitorados:*\n"
+                    f"{lista}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Voce nao tem itens monitorados para remover."
+                )
+            return
+
+        item_name = ' '.join(context.args)
+
+        success, message = await self.monitor_service.remove_monitor(
+            application=self.app,
+            user_id=user.id,
+            item_name=item_name
+        )
+
+        if success:
+            await update.message.reply_text(f"✅ {message}")
+        else:
+            await update.message.reply_text(f"❌ {message}")
+
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler de erros globais"""
         logger.error(f"Erro capturado: {context.error}", exc_info=context.error)
@@ -379,14 +511,25 @@ class TelegramBot:
 
     def setup_handlers(self) -> None:
         """Configura os handlers do bot"""
+        # Comandos basicos
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
+
+        # Comandos de monitoramento
+        self.app.add_handler(CommandHandler("monitor", self.monitor_command))
+        self.app.add_handler(CommandHandler("lista", self.lista_command))
+        self.app.add_handler(CommandHandler("remover", self.remover_command))
+
+        # Callbacks
         self.app.add_handler(CallbackQueryHandler(self.handle_refinement_callback, pattern="^ref_"))
         self.app.add_handler(CallbackQueryHandler(self.handle_analysis_callback, pattern="^analysis$"))
         self.app.add_handler(CallbackQueryHandler(self.handle_back_callback, pattern="^back_to_result$"))
+
+        # Mensagens de texto (busca)
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
+
         self.app.add_error_handler(self.error_handler)
         logger.info("Handlers configurados com sucesso")
 
@@ -394,6 +537,11 @@ class TelegramBot:
         """Inicia o bot"""
         self.app = ApplicationBuilder().token(Settings.BOT_TOKEN).build()
         self.setup_handlers()
+
+        # Restaura jobs de monitoramento
+        restored = self.monitor_service.restore_jobs(self.app)
+        if restored > 0:
+            logger.info(f"📡 {restored} monitoramento(s) restaurado(s)")
 
         # Log de informacoes de ambiente
         if Settings.IS_RENDER:
