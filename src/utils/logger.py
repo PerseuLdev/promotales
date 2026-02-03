@@ -86,15 +86,18 @@ def setup_logger(
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Retorna um logger com o nome especificado
-    
+    Retorna um logger filho do logger principal 'promotales'
+
     Args:
         name: Nome do logger (geralmente __name__)
-        
+
     Returns:
-        logging.Logger: Logger configurado
+        logging.Logger: Logger configurado como filho do promotales
     """
-    return logging.getLogger(name)
+    # Usa hierarquia para herdar handlers do logger principal
+    if name.startswith("promotales"):
+        return logging.getLogger(name)
+    return logging.getLogger(f"promotales.{name}")
 
 
 # Logger padrão do PromoTales
@@ -104,3 +107,6 @@ promotales_logger = setup_logger(
     log_file="logs/promotales.log",
     enable_colors=True
 )
+
+# Garante que logs dos filhos propaguem para o pai
+promotales_logger.propagate = False
