@@ -269,7 +269,7 @@ class TestTelegramBotSetup:
         bot.setup_handlers()
 
         # Verify handlers were added (start, help, callback query, message handler, error handler)
-        assert bot.app.add_handler.call_count == 4  # start, help, ref_callback, message
+        assert bot.app.add_handler.call_count == 6  # start, help, ref_callback, analysis_callback, back_callback, message
         bot.app.add_error_handler.assert_called_once()
     
     def test_run_local_environment(self, bot):

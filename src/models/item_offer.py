@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING, Any
 
 
 @dataclass
@@ -354,6 +354,7 @@ class ItemSearchResult:
     ofertas: List[ItemOffer] = field(default_factory=list)
     preco_medio: Optional[str] = None
     volume_vendas: Optional[str] = None  # Volume de vendas nos ultimos 45 dias
+    price_history: Optional[Any] = None  # PriceHistory - historico de precos
 
     def is_equipamento(self) -> bool:
         """Verifica se as ofertas sao de equipamentos"""
@@ -446,12 +447,8 @@ class ItemSearchResult:
             if total > 1:
                 msg += f"🏪 Total no market: {total:,} un\n".replace(",", ".")
 
-        # Preco medio
-        if self.preco_medio:
-            msg += f"\n📊 Media 45d: {self.preco_medio} zenys"
-
         # Volume de vendas
         if self.volume_vendas:
-            msg += f"\n📈 Vendas 45d: {self.volume_vendas}"
+            msg += f"📈 Vendas 45d: {self.volume_vendas}"
 
         return msg.strip()

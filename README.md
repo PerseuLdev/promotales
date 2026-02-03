@@ -4,29 +4,46 @@ Bot do Telegram para buscar preços de itens no market do Ragnatales.
 
 ## Descrição
 
-O PromoTales Bot é um assistente automatizado que ajuda jogadores do Ragnatales a encontrar os melhores preços de itens no market do jogo. Ele utiliza web scraping para coletar informações em tempo real do site oficial.
+O PromoTales Bot é um assistente automatizado que ajuda jogadores do Ragnatales a encontrar os melhores preços de itens no market do jogo. Ele utiliza **DrissionPage** para web scraping com bypass de Cloudflare.
 
 ## Funcionalidades
 
-- 🔍 Busca de itens por nome
+- 🔍 Busca de itens por nome (equipamentos, cartas, consumíveis)
 - 💰 Encontra o menor preço disponível
-- 📍 Localização exata da loja (@market X/Y)
-- 📊 Média de preços do mercado
+- 📊 Média de preços dos últimos 45 dias
+- 📈 Volume de vendas dos últimos 45 dias
+- 📅 Histórico de preços (últimos 7 dias)
+- 🎴 Detalhes de cartas equipadas
+- ✨ Bônus aleatórios dos equipamentos
 - ⚡ Respostas rápidas via Telegram
+
+## Informações Capturadas
+
+| Dado | Descrição |
+|------|-----------|
+| Nome do item | Nome completo com slots |
+| Refinamento | Nível de refino (+0 a +20) |
+| Preço | Valor em zenys |
+| Vendedor | Nome da loja |
+| Quantidade | Unidades disponíveis |
+| Cartas | Lista de cartas equipadas |
+| Bônus Aleatórios | Encantamentos do item |
+| Preço Médio (45d) | Média de preço do mercado |
+| Volume (45d) | Total de vendas no período |
+| Histórico | Min/Méd/Máx por dia |
 
 ## Requisitos
 
 - Python 3.8+
 - Google Chrome instalado
-- ChromeDriver (instalado automaticamente)
 - Token do Bot do Telegram
 
 ## Instalação
 
 1. Clone o repositório:
 ```bash
-git clone <url-do-repositorio>
-cd PromoTales
+git clone https://github.com/PerseuLdev/promotales.git
+cd promotales
 ```
 
 2. Instale as dependências:
@@ -35,8 +52,8 @@ pip install -r requirements.txt
 ```
 
 3. Configure as variáveis de ambiente:
-Crie um arquivo `.env` na raiz do projeto:
-```env
+```bash
+# Crie um arquivo .env na raiz do projeto
 BOT_TOKEN=seu_token_do_telegram_aqui
 ```
 
@@ -52,70 +69,75 @@ No Telegram:
 2. Digite `/start` para começar
 3. Envie o nome do item que deseja buscar
 
+### Exemplos de Busca
+
+- `folha afiada` - Item consumível
+- `Alma da Feiticeira Celia` - Carta
+- `Cajado Corrompido da Kathryne` - Equipamento com refino
+
 ## Estrutura do Projeto
 
 ```
 PromoTales/
 ├── src/
-│   ├── bot/          # Módulos do bot do Telegram
-│   ├── scraper/      # Módulos de web scraping
-│   └── utils/        # Utilitários gerais
-├── tests/            # Testes automatizados
-├── docs/             # Documentação adicional
-├── config/           # Arquivos de configuração
-├── main.py           # Arquivo principal
-├── requirements.txt  # Dependências do projeto
-└── .env             # Variáveis de ambiente (não versionado)
+│   ├── bot/              # Bot do Telegram
+│   │   └── telegram_bot.py
+│   ├── scraper/          # Web scraping com DrissionPage
+│   │   └── ragnatales_scraper.py
+│   ├── models/           # Modelos de dados
+│   │   ├── item_offer.py
+│   │   └── price_history.py
+│   ├── utils/            # Utilitários
+│   │   ├── browser_setup.py  # Configuração do DrissionPage
+│   │   ├── logger.py
+│   │   └── validators.py
+│   ├── config/           # Configurações
+│   │   └── settings.py
+│   └── exceptions.py     # Exceções customizadas
+├── tests/                # Testes automatizados
+├── docs/                 # Documentação
+├── main.py               # Ponto de entrada
+├── requirements.txt      # Dependências
+└── .env                  # Variáveis de ambiente (não versionado)
 ```
-
-## Configuração para Deploy
-
-### Render (Cloud)
-
-O bot detecta automaticamente se está rodando no Render e ajusta as configurações:
-- Modo headless
-- ChromeDriver auto-instalado
-- Configurações otimizadas para cloud
-
-### Local (Desenvolvimento)
-
-Para desenvolvimento local, certifique-se de:
-- Ter o Google Chrome instalado em `C:\Program Files\Google\Chrome\Application\chrome.exe`
-- Ter o `chromedriver.exe` na pasta raiz ou no PATH
 
 ## Tecnologias
 
 - **python-telegram-bot** - Interface com Telegram
-- **Selenium** - Automação web
-- **selenium-wire** - Interceptação de requisições
+- **DrissionPage** - Automação web com bypass de Cloudflare
 - **python-dotenv** - Gerenciamento de variáveis de ambiente
-- **chromedriver-autoinstaller** - Instalação automática do ChromeDriver
+
+## Configuração por Ambiente
+
+### Local (Desenvolvimento)
+- Chrome com interface gráfica
+- Necessário para passar verificação Cloudflare
+- Chrome path: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+
+### Cloud (Render)
+- Modo headless (pode ter limitações com Cloudflare)
+- Chrome path: `/usr/bin/google-chrome`
+- Detectado automaticamente via variável `RENDER`
+
+## Limitações
+
+- **Modo Headless**: Cloudflare pode bloquear requisições em modo headless
+- **Rate Limiting**: Respeite os limites do site para evitar bloqueios
 
 ## Roadmap
 
-### Milestone 1: Estruturação e Organização ✅
 - [x] Estrutura de diretórios
-- [x] Documentação inicial
-- [ ] Refatoração em módulos
-- [ ] Testes básicos
-
-### Milestone 2: Melhorias e Features
+- [x] Migração Selenium → DrissionPage
+- [x] Captura de cartas e bônus aleatórios
+- [x] Histórico de preços
 - [ ] Cache de resultados
-- [ ] Suporte a múltiplos itens
-- [ ] Histórico de preços
 - [ ] Notificações de preços
-
-### Milestone 3: Otimizações
-- [ ] Performance de scraping
-- [ ] Rate limiting
-- [ ] Logs estruturados
-- [ ] Monitoramento
+- [ ] Busca em abas paralelas
 
 ## Contribuindo
 
-Contribuições são bem-vindas! Por favor:
-1. Faça um fork do projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/MinhaFeature`)
+1. Fork o projeto
+2. Crie uma branch (`git checkout -b feature/MinhaFeature`)
 3. Commit suas mudanças (`git commit -m 'Add: MinhaFeature'`)
 4. Push para a branch (`git push origin feature/MinhaFeature`)
 5. Abra um Pull Request

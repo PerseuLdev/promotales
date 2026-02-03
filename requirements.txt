@@ -2,12 +2,10 @@
 python-telegram-bot==20.7
 
 # Web Scraping
-selenium==4.15.2
-undetected-chromedriver==3.5.5
+DrissionPage>=4.0.0
 
 # Utilitários
 python-dotenv==1.0.0
-chromedriver-autoinstaller==0.6.3
 
 # Web Framework (para deploy)
 blinker==1.6.2

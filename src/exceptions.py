@@ -34,11 +34,15 @@ class ScraperException(PromoTalesException):
         super().__init__(self.message)
 
 
-class ChromeDriverException(ScraperException):
-    """Exceção lançada quando há problemas com o ChromeDriver"""
-    
-    def __init__(self, message: str = "Erro ao iniciar ChromeDriver"):
+class BrowserException(ScraperException):
+    """Exceção lançada quando há problemas com o Browser (DrissionPage)"""
+
+    def __init__(self, message: str = "Erro ao iniciar Browser"):
         super().__init__(message)
+
+
+# Alias para compatibilidade retroativa
+ChromeDriverException = BrowserException
 
 
 class PageLoadException(ScraperException):

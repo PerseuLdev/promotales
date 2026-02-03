@@ -97,6 +97,10 @@ class TelegramBot:
             if row:
                 buttons.append(row)
 
+        # Adiciona botao de analise de mercado (se tiver historico)
+        if result.price_history:
+            buttons.append([InlineKeyboardButton("📊 Análise de Mercado", callback_data="analysis")])
+
         # Adiciona botao com link do produto (usa primeira oferta que tenha link)
         link = next((o.link for o in result.ofertas if o.link), None)
         if link:
@@ -279,6 +283,91 @@ class TelegramBot:
                 reply_markup=keyboard
             )
 
+    async def handle_analysis_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler para callback do botao de analise de mercado"""
+        query = update.callback_query
+        await query.answer()
+
+        # Recupera busca pelo ID da mensagem
+        message_id = query.message.message_id
+        result = context.user_data.get(f'search_{message_id}')
+
+        if not result:
+            await query.edit_message_text(
+                "❌ Busca expirada. Por favor, faca uma nova busca."
+            )
+            return
+
+        if not result.price_history:
+            keyboard = self._create_refinement_keyboard(result)
+            await query.edit_message_text(
+                "❌ Historico de precos nao disponivel para este item.",
+                reply_markup=keyboard
+            )
+            return
+
+        # Obtem preco atual (mais barato)
+        mais_barato = result.mais_barato()
+        preco_atual = mais_barato.preco if mais_barato else 0
+
+        # Gera mensagem de analise
+        response = result.price_history.to_analysis_message(preco_atual)
+
+        # Adiciona botao para voltar
+        buttons = [[InlineKeyboardButton("⬅️ Voltar", callback_data="back_to_result")]]
+
+        # Adiciona link do produto
+        link = next((o.link for o in result.ofertas if o.link), None)
+        if link:
+            buttons.append([InlineKeyboardButton("🔗 Ver no site", url=link)])
+
+        keyboard = InlineKeyboardMarkup(buttons)
+
+        await query.edit_message_text(
+            response,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+
+    async def handle_back_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler para callback do botao de voltar"""
+        query = update.callback_query
+        await query.answer()
+
+        # Recupera busca pelo ID da mensagem
+        message_id = query.message.message_id
+        result = context.user_data.get(f'search_{message_id}')
+
+        if not result:
+            await query.edit_message_text(
+                "❌ Busca expirada. Por favor, faca uma nova busca."
+            )
+            return
+
+        # Reconstroi a mensagem de resumo
+        mais_barato = result.mais_barato()
+        response = result.resumo()
+
+        # Se tem cartas ou bonus, mostra detalhes do mais barato
+        if mais_barato and (mais_barato.cartas or mais_barato.bonus_aleatorios):
+            response += "\n\n📦 *Detalhes do mais barato:*\n"
+            if mais_barato.cartas:
+                response += f"💎 Cartas: {', '.join(mais_barato.cartas)}\n"
+            if mais_barato.bonus_aleatorios:
+                for bonus in mais_barato.bonus_aleatorios:
+                    response += f"✨ {bonus}\n"
+
+        # Media no final
+        if result.preco_medio:
+            response += f"\n📊 *Media 45d:* {result.preco_medio} zenys"
+
+        keyboard = self._create_refinement_keyboard(result)
+        await query.edit_message_text(
+            response,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler de erros globais"""
         logger.error(f"Erro capturado: {context.error}", exc_info=context.error)
@@ -293,6 +382,8 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CallbackQueryHandler(self.handle_refinement_callback, pattern="^ref_"))
+        self.app.add_handler(CallbackQueryHandler(self.handle_analysis_callback, pattern="^analysis$"))
+        self.app.add_handler(CallbackQueryHandler(self.handle_back_callback, pattern="^back_to_result$"))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
