@@ -233,6 +233,86 @@ class MonitorService:
 
         return False, f"Item '{item_name}' não está sendo monitorado"
 
+    async def update_monitor(
+        self,
+        application: Application,
+        user_id: int,
+        chat_id: int,
+        item_name: str,
+        interval_minutes: Optional[int] = None,
+        alert_drop_percent: Optional[float] = None,
+        alert_rise_percent: Optional[float] = None,
+        alert_target_price: Optional[int] = None,
+        clear_alerts: bool = False
+    ) -> tuple[bool, str]:
+        """
+        Atualiza parâmetros de um item monitorado
+
+        Args:
+            application: Aplicação do Telegram
+            user_id: ID do usuário
+            chat_id: ID do chat para notificações
+            item_name: Nome do item
+            interval_minutes: Novo intervalo em minutos (opcional)
+            alert_drop_percent: Novo alerta de queda (opcional)
+            alert_rise_percent: Novo alerta de subida (opcional)
+            alert_target_price: Novo alerta de preço alvo (opcional)
+            clear_alerts: Se True, limpa alertas não especificados
+
+        Returns:
+            tuple: (sucesso, mensagem)
+        """
+        # Busca item existente
+        item = self.storage.get(user_id, item_name)
+        if not item:
+            return False, f"Item '{item_name}' não está sendo monitorado"
+
+        # Valida intervalo se fornecido
+        if interval_minutes is not None:
+            if interval_minutes < MIN_INTERVAL_MINUTES:
+                return False, f"Intervalo mínimo é {MIN_INTERVAL_MINUTES} minutos"
+            item.interval_minutes = interval_minutes
+
+        # Atualiza alertas
+        if clear_alerts:
+            # Limpa todos e define apenas os novos
+            item.alert_drop_percent = alert_drop_percent
+            item.alert_rise_percent = alert_rise_percent
+            item.alert_target_price = alert_target_price
+            # Reseta flags de alertas disparados
+            item.reset_alerts()
+        else:
+            # Atualiza apenas os fornecidos
+            if alert_drop_percent is not None:
+                item.alert_drop_percent = alert_drop_percent
+                item.alert_drop_triggered = False
+            if alert_rise_percent is not None:
+                item.alert_rise_percent = alert_rise_percent
+                item.alert_rise_triggered = False
+            if alert_target_price is not None:
+                item.alert_target_price = alert_target_price
+                item.alert_target_triggered = False
+
+        # Salva alterações
+        self.storage.update(item)
+
+        # Reagenda job com novo intervalo
+        self._schedule_job(application, item, chat_id)
+
+        logger.info(f"Monitoramento atualizado: {item_name} para usuário {user_id}")
+
+        # Monta mensagem de resposta
+        response = f"Monitoramento de '*{item_name}*' atualizado\n"
+        response += f"⏱️ Intervalo: {item.interval_minutes} minutos\n"
+        response += f"📍 Preço base: {item.base_price:,}z\n".replace(",", ".") if item.base_price else ""
+
+        if item.has_alerts_configured():
+            response += f"\n🔔 Alertas: {item.alerts_summary()}"
+        else:
+            response += "\n🔕 Sem alertas configurados"
+
+        return True, response
+
     def list_monitors(self, user_id: int) -> list[MonitoredItem]:
         """Lista itens monitorados de um usuário"""
         return self.storage.get_user_items(user_id)

@@ -206,23 +206,21 @@ class TelegramBot:
             "*Busca com refinamento:*\n"
             "• `+9 manto da bruxa` - busca direto +9\n"
             "• `manto da bruxa +7` - busca direto +7\n\n"
-            "*Comandos de busca:*\n"
-            "/start - Inicia o bot\n"
-            "/help - Mostra esta mensagem\n\n"
-            "*Comandos de monitoramento:*\n"
-            f"`/monitor <item>, <min>[, alertas]`\n"
-            "/lista - Lista itens monitorados\n"
-            "/remover <item> - Remove monitoramento\n\n"
             "*Exemplos de monitoramento:*\n"
             "• `/monitor manto, 30` - simples\n"
-            "• `/monitor +10 vestido, 15, -50%` - alerta queda\n"
-            "• `/monitor cajado, 15, +30%` - alerta subida\n"
+            "• `/monitor +10 vestido, 15, -50%` - queda\n"
+            "• `/monitor cajado, 15, +30%` - subida\n"
             "• `/monitor anel, 20, -20%, +50%` - ambos\n"
-            "• `/monitor item, 15, 100000000` - preco alvo\n\n"
+            "• `/atualizar manto, 10, -25%` - atualiza\n\n"
             "*Limites:*\n"
-            f"⚠️ Max 5 buscas/min | Max {MAX_ITEMS_PER_USER} itens monitorados"
+            f"⚠️ Max 5 buscas/min | Max {MAX_ITEMS_PER_USER} itens monitorados\n\n"
+            "Use /comandos para ver todos os comandos"
         )
         await update.message.reply_text(help_message, parse_mode='Markdown')
+
+    async def comandos_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler do comando /comandos - alias para /help"""
+        await self.help_command(update, context)
 
     def _create_refinement_keyboard(self, result: ItemSearchResult) -> InlineKeyboardMarkup:
         """Cria teclado inline com opcoes de refinamento individuais"""
@@ -784,6 +782,77 @@ class TelegramBot:
         else:
             await update.message.reply_text(f"❌ {message}")
 
+    async def atualizar_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handler do comando /atualizar <item>, <minutos>[, <alertas>]"""
+        user = update.effective_user
+        chat_id = update.effective_chat.id
+
+        logger.info(f"Comando /atualizar recebido de {user.username} (ID: {user.id})")
+
+        # Pega o texto completo após o comando
+        full_text = update.message.text
+
+        # Remove o comando /atualizar do início
+        if full_text.startswith('/atualizar'):
+            text = full_text[10:].strip()
+        else:
+            text = full_text.strip()
+
+        if not text:
+            # Mostra lista para ajudar
+            items = self.monitor_service.list_monitors(user.id)
+            if items:
+                lista = '\n'.join(f"• `{item.item_name}` ({item.interval_minutes}min)" for item in items)
+                await update.message.reply_text(
+                    "❌ *Uso correto:*\n"
+                    "`/atualizar <item>, <minutos>[, alertas]`\n\n"
+                    "*Exemplos:*\n"
+                    "`/atualizar manto da bruxa, 10`\n"
+                    "`/atualizar manto da bruxa, 15, -30%`\n"
+                    "`/atualizar manto, 20, -20%, +50%`\n\n"
+                    "*Seus itens monitorados:*\n"
+                    f"{lista}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Voce nao tem itens monitorados para atualizar."
+                )
+            return
+
+        # Parseia os argumentos (reutiliza o parser do monitor)
+        item_name, interval, alert_drop, alert_rise, alert_target, error = self._parse_monitor_args(full_text.replace('/atualizar', '/monitor'))
+
+        if error:
+            await update.message.reply_text(
+                f"❌ {error}\n\n"
+                "*Uso correto:*\n"
+                "`/atualizar <item>, <minutos>[, alertas]`\n\n"
+                "*Exemplos:*\n"
+                "`/atualizar manto da bruxa, 10`\n"
+                "`/atualizar manto, 15, -30%, +20%`",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Atualiza monitoramento
+        success, message = await self.monitor_service.update_monitor(
+            application=self.app,
+            user_id=user.id,
+            chat_id=chat_id,
+            item_name=item_name,
+            interval_minutes=interval,
+            alert_drop_percent=alert_drop,
+            alert_rise_percent=alert_rise,
+            alert_target_price=alert_target,
+            clear_alerts=True  # Substitui alertas ao invés de adicionar
+        )
+
+        if success:
+            await update.message.reply_text(f"✅ {message}", parse_mode='Markdown')
+        else:
+            await update.message.reply_text(f"❌ {message}", parse_mode='Markdown')
+
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handler de erros globais"""
         logger.error(f"Erro capturado: {context.error}", exc_info=context.error)
@@ -798,11 +867,13 @@ class TelegramBot:
         # Comandos basicos
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("comandos", self.comandos_command))
 
         # Comandos de monitoramento
         self.app.add_handler(CommandHandler("monitor", self.monitor_command))
         self.app.add_handler(CommandHandler("lista", self.lista_command))
         self.app.add_handler(CommandHandler("remover", self.remover_command))
+        self.app.add_handler(CommandHandler("atualizar", self.atualizar_command))
 
         # Callbacks
         self.app.add_handler(CallbackQueryHandler(self.handle_refinement_callback, pattern="^ref_"))
