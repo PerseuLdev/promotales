@@ -86,9 +86,10 @@ class RagnatalesScraper:
 
             # Refresh para garantir estado limpo (necessario para pesquisas subsequentes)
             self.page.refresh(ignore_cache=True)
+            time.sleep(2)  # Aguarda pagina estabilizar apos refresh
 
-            # Espera campo de busca carregar (timeout de 15s)
-            search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=15)
+            # Espera campo de busca carregar (timeout de 20s para servidor lento)
+            search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=20)
             search_field.click()
             search_field.clear()
             time.sleep(0.5)
