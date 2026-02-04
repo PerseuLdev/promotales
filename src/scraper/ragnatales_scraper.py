@@ -79,13 +79,13 @@ class RagnatalesScraper:
             bool: True se encontrou o item, False caso contrario
         """
         try:
-            # Limpa estado anterior navegando para pagina em branco
-            self.page.get('about:blank')
-
             # Navega para a pagina de itens (URL limpa, sem filtros anteriores)
             clean_url = Settings.RAGNATALES_URL.split('?')[0]
             logger.debug(f"Navegando para: {clean_url}")
             self.page.get(clean_url)
+
+            # Refresh para garantir estado limpo (necessario para pesquisas subsequentes)
+            self.page.refresh(ignore_cache=True)
 
             # Espera campo de busca carregar (timeout de 15s)
             search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=15)
