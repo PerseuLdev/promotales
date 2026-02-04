@@ -22,6 +22,7 @@ def setup_browser_options() -> ChromiumOptions:
     co.set_argument('--no-sandbox')
     co.set_argument('--disable-dev-shm-usage')
     co.set_argument('--window-size=1920,1080')
+    co.set_argument('--incognito')  # Modo incognito para nao manter estado entre sessoes
 
     # Configuracao especifica por ambiente
     if Settings.IS_ORACLE:
