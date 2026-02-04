@@ -345,9 +345,10 @@ class RagnatalesScraper:
                 # Fallback: tenta XPath direto
                 shops_button = self.page.ele('xpath://button[contains(., "lojas")]', timeout=5)
 
+            # Scrolla e clica via JavaScript (mais confiavel)
             shops_button.scroll.to_center()
             time.sleep(1)
-            shops_button.click()
+            self.page.run_js('arguments[0].click()', shops_button)
 
             # Espera as ofertas carregarem
             time.sleep(Settings.SHOPS_TIMEOUT)
