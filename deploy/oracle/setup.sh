@@ -47,18 +47,22 @@ sudo apt install -y chromium-browser
 CHROME_PATH=$(which chromium-browser || which chromium)
 echo "Chromium instalado em: $CHROME_PATH"
 
-# Configura swap (importante para 1GB RAM)
-echo "[4/6] Configurando swap..."
-if [ ! -f /swapfile ]; then
-    sudo fallocate -l 1G /swapfile
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
-    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-    echo "Swap de 1GB configurado"
-else
-    echo "Swap ja existe"
+# Configura swap de 4GB (necessario para Chrome com 1GB RAM)
+echo "[4/6] Configurando swap de 4GB..."
+SWAP_SIZE="4G"
+if [ -f /swapfile ]; then
+    # Remove swap existente para recriar com novo tamanho
+    sudo swapoff /swapfile 2>/dev/null || true
+    sudo rm /swapfile
+    echo "Swap anterior removido"
 fi
+sudo fallocate -l $SWAP_SIZE /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+# Adiciona ao fstab se nao existir
+grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+echo "Swap de $SWAP_SIZE configurado"
 
 # Mostra memoria
 echo ""

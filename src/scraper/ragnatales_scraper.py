@@ -84,10 +84,6 @@ class RagnatalesScraper:
             logger.debug(f"Navegando para: {clean_url}")
             self.page.get(clean_url)
 
-            # Refresh forcado para limpar estado/cache do browser
-            self.page.refresh(ignore_cache=True)
-            logger.debug("Refresh forcado executado")
-
             # Espera campo de busca carregar (timeout de 15s)
             search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=15)
             search_field.click()

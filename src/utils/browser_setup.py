@@ -24,6 +24,28 @@ def setup_browser_options() -> ChromiumOptions:
     co.set_argument('--window-size=1920,1080')
     co.set_argument('--incognito')  # Modo incognito para nao manter estado entre sessoes
 
+    # Economia de memoria
+    co.set_argument('--disable-extensions')
+    co.set_argument('--disable-plugins')
+    co.set_argument('--disable-background-networking')
+    co.set_argument('--disable-sync')
+    co.set_argument('--disable-translate')
+    co.set_argument('--disable-default-apps')
+    co.set_argument('--mute-audio')
+    co.set_argument('--no-first-run')
+    co.set_argument('--no-default-browser-check')
+    co.set_argument('--disable-hang-monitor')
+    co.set_argument('--disable-popup-blocking')
+    co.set_argument('--disable-prompt-on-repost')
+    co.set_argument('--disable-background-timer-throttling')
+    co.set_argument('--disable-renderer-backgrounding')
+    co.set_argument('--disable-backgrounding-occluded-windows')
+    co.set_argument('--disable-features=TranslateUI')
+    co.set_argument('--disable-ipc-flooding-protection')
+    co.set_argument('--memory-pressure-off')
+    co.set_argument('--js-flags=--max-old-space-size=512')  # Limita heap JS a 512MB
+    co.set_argument('--renderer-process-limit=1')  # Limita processos de renderizacao
+
     # Configuracao especifica por ambiente
     if Settings.IS_ORACLE:
         # Oracle Cloud: usa Xvfb (tela virtual), sem headless para passar Cloudflare
