@@ -51,7 +51,7 @@ class BrowserManager:
         self._in_use = False
         self._use_count = 0
         self._last_used: float = 0
-        self._max_uses_before_restart = 50  # Reinicia após N usos para evitar memory leak
+        self._max_uses_before_restart = 1  # Reinicia a cada uso para garantir estado limpo
         self._initialized = True
 
         logger.info("BrowserManager singleton inicializado")
