@@ -85,14 +85,11 @@ class RagnatalesScraper:
             self.page.get(clean_url)
             time.sleep(Settings.PAGE_LOAD_TIMEOUT)
 
-            # Busca pelo item - limpa campo completamente antes de digitar
+            # Busca pelo item - limpa campo e digita o termo
             search_field = self.page.ele("css:input[placeholder='Filtrar por nome']")
             search_field.click()
-            logger.debug(f"Campo de busca encontrado, valor atual: '{search_field.value}'")
-            # Seleciona todo o texto e apaga (mais confiavel que clear())
-            search_field.input('', clear=True)
+            search_field.clear()
             time.sleep(0.5)
-            logger.debug(f"Campo limpo, valor apos clear: '{search_field.value}'")
             search_field.input(item_name + '\n')
             logger.info(f"Termo digitado no campo de busca: '{item_name}'")
             logger.debug(f"Termo de busca enviado: '{item_name}'")
