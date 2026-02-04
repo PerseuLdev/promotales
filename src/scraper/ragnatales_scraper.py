@@ -79,6 +79,13 @@ class RagnatalesScraper:
             bool: True se encontrou o item, False caso contrario
         """
         try:
+            # Limpa estado anterior navegando para about:blank primeiro
+            try:
+                self.page.get('about:blank')
+                time.sleep(0.5)
+            except:
+                pass
+
             # Navega para a pagina de itens (URL limpa, sem filtros anteriores)
             clean_url = Settings.RAGNATALES_URL.split('?')[0]
             logger.debug(f"Navegando para: {clean_url}")

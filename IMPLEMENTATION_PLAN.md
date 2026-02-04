@@ -88,55 +88,60 @@ Otimizar o PromoTales Bot para diferentes ambientes com melhor performance e esc
 - [x] Testar bot responsivo durante busca
 - [x] Testar timeout de jobs
 
+
 ---
 
-## Fase 3: Redis + Pool (Produção)
-**Objetivo:** Escalar para múltiplos usuários
+## Fase 3: SQLite + Oracle Cloud (MVP Produção)
+**Objetivo:** Deploy em produção com baixo consumo de memória (1GB RAM)
 
-### 3.1 Redis Cache
-- [ ] Criar `src/services/redis_cache.py`
-  - [ ] Classe `RedisCache` (implementa BaseCache)
-  - [ ] Conexão com Redis
-  - [ ] Serialização/deserialização de resultados
-  - [ ] TTL nativo do Redis
+### 3.1 SQLite Cache (Adaptado de Redis)
+- [x] Criar `src/services/sqlite_cache.py`
+  - [x] Classe `SQLiteCache` (implementa BaseCache)
+  - [x] Tabela com key, value, created_at, ttl
+  - [x] Serialização JSON de ItemSearchResult
+  - [x] TTL com cleanup automático
+  - [x] Thread-safe (connection per thread)
+  - [x] Método vacuum() para otimização
 
-### 3.2 Browser Pool Expandido
-- [ ] Modificar `src/services/browser_pool.py`
-  - [ ] Classe `BrowserPool` (múltiplas instâncias)
-  - [ ] Método `acquire()` async - pega browser disponível
-  - [ ] Método `release()` async - devolve ao pool
-  - [ ] Health check periódico
-  - [ ] Configurável via `BROWSER_POOL_SIZE`
+### 3.2 Configurações Produção
+- [x] Modificar `src/config/settings.py`
+  - [x] `IS_ORACLE` detection
+  - [x] `CACHE_TYPE` = "sqlite" ou "memory"
+  - [x] `SQLITE_DB_PATH` configurável
+  - [x] `HEADLESS = True` em produção
+  - [x] `get_chrome_binary()` helper
 
-### 3.3 Redis Job Queue
-- [ ] Modificar `src/services/job_queue.py`
-  - [ ] Classe `RedisJobQueue`
-  - [ ] Fila persistente no Redis
-  - [ ] Múltiplos workers podem consumir
+### 3.3 Factory de Cache
+- [x] Modificar `src/bot/telegram_bot.py`
+  - [x] `create_cache()` factory function
+  - [x] Seleciona MemoryCache ou SQLiteCache
+  - [x] Logs de ambiente (Oracle/Render/Local)
 
-### 3.4 Worker Processes
-- [ ] Modificar `src/services/search_worker.py`
-  - [ ] Suporte a múltiplos workers
-  - [ ] Async/await
-  - [ ] Graceful shutdown
+### 3.4 Scripts de Deploy Oracle Cloud
+- [x] Criar `deploy/oracle/setup.sh`
+  - [x] Instalação de dependências
+  - [x] Configuração de swap (1GB)
+  - [x] Instalação do Chromium
+- [x] Criar `deploy/oracle/promotales.service`
+  - [x] Systemd unit file
+  - [x] Limites de memória (700M max)
+  - [x] Variáveis de ambiente
+- [x] Criar `deploy/oracle/install.sh`
+  - [x] Setup do venv
+  - [x] Instalação de deps Python
+  - [x] Habilitação do systemd
+- [x] Criar `deploy/oracle/update.sh`
+- [x] Criar `deploy/oracle/backup.sh`
 
-### 3.5 Configurações Produção
-- [ ] Modificar `src/config/settings.py`
-  - [ ] `REDIS_URL` do ambiente
-  - [ ] `BROWSER_POOL_SIZE = 3`
-  - [ ] `WORKER_COUNT = 2`
-  - [ ] `HEADLESS = True`
+### 3.5 Testes Fase 3
+- [x] Testes unitários SQLiteCache
+- [x] Testes de serialização
+- [x] Testes de thread-safety
 
-### 3.6 Atualizar Dependências
-- [ ] Modificar `requirements.txt`
-  - [ ] Adicionar `redis>=4.0.0`
-  - [ ] Adicionar `aioredis>=2.0.0` (opcional)
-
-### 3.7 Testes Fase 3
-- [ ] Testar conexão Redis
-- [ ] Testar cache distribuído
-- [ ] Testar pool de browsers
-- [ ] Testar múltiplos workers
+### 3.6 Futura Escalabilidade (Hostinger KVM2)
+- [ ] Redis Cache (quando tiver 2GB+ RAM)
+- [ ] Browser Pool com múltiplas instâncias
+- [ ] Múltiplos workers
 
 ---
 
@@ -169,14 +174,19 @@ Otimizar o PromoTales Bot para diferentes ambientes com melhor performance e esc
 - [x] `src/services/browser_pool.py`
 - [x] `src/services/job_queue.py`
 - [x] `src/services/search_worker.py`
-- [ ] `src/services/redis_cache.py` (Fase 3)
+- [x] `src/services/sqlite_cache.py` (Fase 3)
+- [x] `deploy/oracle/setup.sh`
+- [x] `deploy/oracle/install.sh`
+- [x] `deploy/oracle/update.sh`
+- [x] `deploy/oracle/backup.sh`
+- [x] `deploy/oracle/promotales.service`
+- [x] `tests/test_sqlite_cache.py`
 
 ### Modificados
 - [x] `src/config/settings.py`
 - [x] `src/scraper/ragnatales_scraper.py`
 - [ ] `src/services/monitor_service.py`
 - [x] `src/bot/telegram_bot.py`
-- [ ] `requirements.txt`
 
 ---
 
@@ -252,7 +262,8 @@ MVP Hunter,high,+12 lança das trevas,+10 armadura sagrada,anel celestial
 |------|--------|------------|
 | Fase 1 | ✅ Concluída | 100% |
 | Fase 2 | ✅ Concluída | 100% |
-| Fase 3 | ⏳ Pendente | 0% |
+| Fase 3 | ✅ Concluída | 100% |
 | Fase 4 | 📋 Planejado | 0% |
 
 **Última atualização:** 2026-02-03
+**Deploy:** Oracle Cloud (1GB RAM) com SQLite

@@ -1,0 +1,31 @@
+[Unit]
+Description=PromoTales Telegram Bot
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/promotales
+Environment="ORACLE_CLOUD=1"
+Environment="ENVIRONMENT=production"
+Environment="CACHE_TYPE=sqlite"
+Environment="SQLITE_DB_PATH=/opt/promotales/data/cache.db"
+Environment="CHROME_BIN=/usr/bin/chromium-browser"
+Environment="HEADLESS=true"
+EnvironmentFile=/opt/promotales/.env
+ExecStart=/opt/promotales/venv/bin/python -m src.main
+Restart=always
+RestartSec=10
+
+# Limites de recursos (otimizado para 1GB RAM)
+MemoryMax=700M
+MemoryHigh=600M
+
+# Logs
+StandardOutput=append:/opt/promotales/logs/promotales.log
+StandardError=append:/opt/promotales/logs/promotales.error.log
+
+[Install]
+WantedBy=multi-user.target
