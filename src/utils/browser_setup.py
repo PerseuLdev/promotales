@@ -24,11 +24,15 @@ def setup_browser_options() -> ChromiumOptions:
     co.set_argument('--window-size=1920,1080')
 
     # Configuracao especifica por ambiente
-    if Settings.IS_RENDER:
-        # No Render (cloud), precisa de headless
+    if Settings.IS_ORACLE:
+        # Oracle Cloud: usa Xvfb (tela virtual), sem headless para passar Cloudflare
+        co.set_browser_path(Settings.CHROME_BINARY_ORACLE)
+        logger.info("Browser configurado para Oracle Cloud (Xvfb)")
+    elif Settings.IS_RENDER:
+        # Render: usa headless
         co.headless()
         co.set_browser_path(Settings.CHROME_BINARY_RENDER)
-        logger.info("Browser configurado para Render (cloud)")
+        logger.info("Browser configurado para Render (headless)")
     else:
         # Local: sem headless para passar verificacao Cloudflare
         co.set_browser_path(Settings.CHROME_BINARY_LOCAL)

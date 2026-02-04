@@ -18,8 +18,19 @@ from ..config.settings import Settings
 from ..scraper.ragnatales_scraper import RagnatalesScraper
 from ..models.item_offer import ItemSearchResult
 from ..services.monitor_service import MonitorService, MIN_INTERVAL_MINUTES, MAX_ITEMS_PER_USER
-from ..services.cache_service import MemoryCache
+from ..services.cache_service import MemoryCache, BaseCache
 from ..services.browser_pool import get_browser_manager, BrowserManager
+
+
+def create_cache() -> BaseCache:
+    """Factory para criar cache baseado na configuração."""
+    if Settings.CACHE_TYPE == "sqlite":
+        from ..services.sqlite_cache import SQLiteCache
+        return SQLiteCache(
+            db_path=Settings.SQLITE_DB_PATH,
+            default_ttl=Settings.CACHE_TTL
+        )
+    return MemoryCache(default_ttl=Settings.CACHE_TTL)
 from ..services.job_queue import LocalJobQueue, SearchJob, JobStatus
 from ..services.search_worker import SearchWorker
 from ..exceptions import (
@@ -46,7 +57,7 @@ class TelegramBot:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         # Cache e Browser Pool
-        self.cache: MemoryCache = MemoryCache(default_ttl=Settings.CACHE_TTL)
+        self.cache: BaseCache = create_cache()
         self.browser_manager: BrowserManager = get_browser_manager()
 
         # Job Queue e Worker
@@ -61,8 +72,8 @@ class TelegramBot:
         # Mapa de jobs pendentes: job_id -> (chat_id, message_id, user_data_key)
         self._pending_jobs: Dict[str, tuple] = {}
 
-        logger.info(f"Cache inicializado (TTL: {Settings.CACHE_TTL}s)")
-        logger.info(f"BrowserManager inicializado")
+        logger.info(f"Cache inicializado: {Settings.CACHE_TYPE} (TTL: {Settings.CACHE_TTL}s)")
+        logger.info(f"BrowserManager inicializado (headless: {Settings.HEADLESS})")
         logger.info(f"JobQueue inicializada (max_size: {Settings.MAX_QUEUE_SIZE})")
 
     def _on_job_completed(self, job: SearchJob) -> None:
@@ -910,7 +921,10 @@ class TelegramBot:
         # Limpa cache
         cache_stats = self.cache.stats()
         logger.info(f"Cache stats finais: {cache_stats}")
-        self.cache.clear()
+
+        # Fecha conexão SQLite se aplicável
+        if hasattr(self.cache, 'close'):
+            self.cache.close()
 
         # Encerra browser
         self.browser_manager.shutdown()
@@ -941,13 +955,15 @@ class TelegramBot:
             logger.info(f"📡 {restored} monitoramento(s) restaurado(s)")
 
         # Log de informacoes de ambiente
-        if Settings.IS_RENDER:
+        if Settings.IS_ORACLE:
+            logger.info("🚀 Bot rodando no Oracle Cloud (modo producao)")
+        elif Settings.IS_RENDER:
             logger.info("🚀 Bot rodando no Render (modo producao)")
         else:
             logger.info("🛠️ Bot rodando localmente (modo desenvolvimento)")
 
         # Log de cache, browser e fila
-        logger.info(f"💾 Cache: TTL={Settings.CACHE_TTL}s | Ambiente: {Settings.ENVIRONMENT}")
+        logger.info(f"💾 Cache: {Settings.CACHE_TYPE} | TTL={Settings.CACHE_TTL}s")
         logger.info(f"📋 Fila: max_size={Settings.MAX_QUEUE_SIZE}")
 
         logger.info("✅ Bot iniciado com sucesso. Aguardando mensagens...")
