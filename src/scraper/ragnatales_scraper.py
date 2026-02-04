@@ -83,22 +83,21 @@ class RagnatalesScraper:
             clean_url = Settings.RAGNATALES_URL.split('?')[0]
             logger.debug(f"Navegando para: {clean_url}")
             self.page.get(clean_url)
-            time.sleep(Settings.PAGE_LOAD_TIMEOUT)
 
-            # Busca pelo item - limpa campo e digita o termo
-            search_field = self.page.ele("css:input[placeholder='Filtrar por nome']")
+            # Espera campo de busca carregar (timeout de 15s)
+            search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=15)
             search_field.click()
             search_field.clear()
             time.sleep(0.5)
             search_field.input(item_name + '\n')
             logger.info(f"Termo digitado no campo de busca: '{item_name}'")
-            logger.debug(f"Termo de busca enviado: '{item_name}'")
-            time.sleep(Settings.SEARCH_TIMEOUT)
 
-            # Clica no primeiro item encontrado
-            item_link = self.page.ele('xpath://a[starts-with(@href, "/db/items/")]')
+            # Espera o link do item aparecer (timeout de 10s)
+            item_link = self.page.ele('xpath://a[starts-with(@href, "/db/items/")]', timeout=10)
             item_link.click()
-            time.sleep(Settings.CLICK_TIMEOUT)
+
+            # Espera pagina do item carregar - aguarda botao de lojas existir
+            self.page.ele('xpath://button[contains(., "lojas")]', timeout=15)
 
             logger.info(f"Item '{item_name}' encontrado e selecionado")
             return True
@@ -334,18 +333,23 @@ class RagnatalesScraper:
         ofertas = []
 
         try:
-            # Clica no botao de lojas
-            # Tenta XPath especifico primeiro, depois fallback por texto
-            try:
-                shops_button = self.page.ele(
-                    'xpath://*[@id="app"]/div/div/div[2]/div/div[3]/div/div/div/div[5]/div[1]/div/div/div/button',
-                    timeout=3
-                )
-            except:
-                shops_button = self.page.ele('xpath://button[contains(., "lojas")]')
+            # Clica no botao de lojas - busca iterando pelos botoes
+            shops_button = None
+            botoes = self.page.eles('tag:button')
+            for btn in botoes:
+                if btn.text and 'lojas' in btn.text.lower():
+                    shops_button = btn
+                    break
+
+            if not shops_button:
+                # Fallback: tenta XPath direto
+                shops_button = self.page.ele('xpath://button[contains(., "lojas")]', timeout=5)
+
             shops_button.scroll.to_center()
             time.sleep(1)
             shops_button.click()
+
+            # Espera as ofertas carregarem
             time.sleep(Settings.SHOPS_TIMEOUT)
 
             # Busca containers das lojas
