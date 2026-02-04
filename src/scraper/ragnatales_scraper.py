@@ -79,17 +79,14 @@ class RagnatalesScraper:
             bool: True se encontrou o item, False caso contrario
         """
         try:
-            # Limpa estado anterior navegando para about:blank primeiro
-            try:
-                self.page.get('about:blank')
-                time.sleep(0.5)
-            except:
-                pass
-
             # Navega para a pagina de itens (URL limpa, sem filtros anteriores)
             clean_url = Settings.RAGNATALES_URL.split('?')[0]
             logger.debug(f"Navegando para: {clean_url}")
             self.page.get(clean_url)
+
+            # Refresh forcado para limpar estado/cache do browser
+            self.page.refresh(ignore_cache=True)
+            logger.debug("Refresh forcado executado")
 
             # Espera campo de busca carregar (timeout de 15s)
             search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=15)
@@ -172,13 +169,13 @@ class RagnatalesScraper:
 
         return None
 
-    def _get_price_history(self, item_nome: str, dias: int = 7) -> Optional[PriceHistory]:
+    def _get_price_history(self, item_nome: str, dias: int = 60) -> Optional[PriceHistory]:
         """
         Obtem o historico de precos do item.
 
         Args:
             item_nome: Nome do item
-            dias: Numero de dias de historico (max 7)
+            dias: Numero de dias de historico (default 60)
 
         Returns:
             PriceHistory ou None se nao encontrado

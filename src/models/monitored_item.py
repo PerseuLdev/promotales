@@ -105,7 +105,8 @@ class MonitoredItem:
             f"📉 Caiu *{abs(percent_change):.1f}%* do preço base!\n\n"
             f"Preço base: {self.base_price:,}z\n"
             f"Preço atual: {new_price:,}z\n"
-            f"Meta: -{self.alert_drop_percent}%"
+            f"Meta: -{self.alert_drop_percent}%\n\n"
+            f"@market {self.item_name}"
         ).replace(",", ".")
 
     def _format_rise_alert(self, new_price: int, percent_change: float) -> str:
@@ -116,7 +117,8 @@ class MonitoredItem:
             f"📈 Subiu *{percent_change:.1f}%* do preço base!\n\n"
             f"Preço base: {self.base_price:,}z\n"
             f"Preço atual: {new_price:,}z\n"
-            f"Meta: +{self.alert_rise_percent}%"
+            f"Meta: +{self.alert_rise_percent}%\n\n"
+            f"@market {self.item_name}"
         ).replace(",", ".")
 
     def _format_target_alert(self, new_price: int) -> str:
@@ -126,7 +128,8 @@ class MonitoredItem:
             f"Item: *{self.item_name}*\n"
             f"O preço chegou em *{new_price:,}z*!\n\n"
             f"Preço base: {self.base_price:,}z\n"
-            f"Meta: {self.alert_target_price:,}z"
+            f"Meta: {self.alert_target_price:,}z\n\n"
+            f"@market {self.item_name}"
         ).replace(",", ".")
 
     def reset_alerts(self) -> None:
@@ -183,7 +186,8 @@ class MonitoredItem:
             f"Item: *{self.item_name}*\n"
             f"Preço {direction}: {abs(diff):,}z ({abs(percent):.1f}%)\n"
             f"Anterior: {old_price:,}z\n"
-            f"Atual: {new_price:,}z"
+            f"Atual: {new_price:,}z\n\n"
+            f"@market {self.item_name}"
         ).replace(",", ".")
 
 

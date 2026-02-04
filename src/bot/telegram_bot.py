@@ -2,6 +2,7 @@
 
 import re
 import asyncio
+from datetime import datetime
 from typing import Optional, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -264,9 +265,9 @@ class TelegramBot:
             if row:
                 buttons.append(row)
 
-        # Adiciona botao de analise de mercado (se tiver historico)
+        # Adiciona botao de analise de mercado (se tiver historico) - default 7 dias
         if result.price_history:
-            buttons.append([InlineKeyboardButton("📊 Análise de Mercado", callback_data="analysis")])
+            buttons.append([InlineKeyboardButton("📊 Análise de Mercado", callback_data="analysis_7")])
 
         # Adiciona botao com link do produto (usa primeira oferta que tenha link)
         link = next((o.link for o in result.ofertas if o.link), None)
@@ -514,6 +515,15 @@ class TelegramBot:
         query = update.callback_query
         await query.answer()
 
+        # Extrai numero de dias do callback_data (analysis_7, analysis_15, etc)
+        callback_data = query.data
+        dias = 7  # default
+        if "_" in callback_data:
+            try:
+                dias = int(callback_data.split("_")[1])
+            except (ValueError, IndexError):
+                dias = 7
+
         # Recupera busca pelo ID da mensagem
         message_id = query.message.message_id
         result = self._get_search_result(context, message_id)
@@ -536,11 +546,19 @@ class TelegramBot:
         mais_barato = result.mais_barato()
         preco_atual = mais_barato.preco if mais_barato else 0
 
-        # Gera mensagem de analise
-        response = result.price_history.to_analysis_message(preco_atual)
+        # Gera mensagem de analise com o periodo selecionado
+        response = result.price_history.to_analysis_message(preco_atual, dias)
+
+        # Botoes de periodo (marca o selecionado)
+        periodo_buttons = []
+        for d in [7, 15, 30, 60]:
+            label = f"{'✓ ' if d == dias else ''}{d}d"
+            periodo_buttons.append(InlineKeyboardButton(label, callback_data=f"analysis_{d}"))
+
+        buttons = [periodo_buttons]
 
         # Adiciona botao para voltar
-        buttons = [[InlineKeyboardButton("⬅️ Voltar", callback_data="back_to_result")]]
+        buttons.append([InlineKeyboardButton("⬅️ Voltar", callback_data="back_to_result")])
 
         # Adiciona link do produto
         link = next((o.link for o in result.ofertas if o.link), None)
@@ -750,11 +768,21 @@ class TelegramBot:
         for i, item in enumerate(items, 1):
             preco_str = f"{item.last_price:,}z".replace(",", ".") if item.last_price else "N/A"
             base_str = f"{item.base_price:,}z".replace(",", ".") if item.base_price else "N/A"
+            # Formata timestamp da ultima pesquisa
+            if item.last_search:
+                try:
+                    dt = datetime.fromisoformat(item.last_search)
+                    last_search_str = dt.strftime("%d/%m %H:%M")
+                except:
+                    last_search_str = "N/A"
+            else:
+                last_search_str = "Aguardando"
             response += (
                 f"{i}. *{item.item_name}*\n"
                 f"   ⏱️ A cada {item.interval_minutes} min\n"
                 f"   💰 Preco atual: {preco_str}\n"
                 f"   📍 Preco base: {base_str}\n"
+                f"   🕐 Ultima busca: {last_search_str}\n"
             )
             if item.has_alerts_configured():
                 response += f"   🔔 {item.alerts_summary()}\n"
@@ -896,7 +924,7 @@ class TelegramBot:
 
         # Callbacks
         self.app.add_handler(CallbackQueryHandler(self.handle_refinement_callback, pattern="^ref_"))
-        self.app.add_handler(CallbackQueryHandler(self.handle_analysis_callback, pattern="^analysis$"))
+        self.app.add_handler(CallbackQueryHandler(self.handle_analysis_callback, pattern="^analysis_\\d+$"))
         self.app.add_handler(CallbackQueryHandler(self.handle_back_callback, pattern="^back_to_result$"))
 
         # Mensagens de texto (busca)

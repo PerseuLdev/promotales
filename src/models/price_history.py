@@ -198,10 +198,32 @@ class PriceHistory:
         else:
             return "normal"
 
-    def to_analysis_message(self, preco_atual: int) -> str:
-        """Gera mensagem de analise completa"""
-        tendencia = self.tendencia()
-        variacao = self.variacao_percentual()
+    def to_analysis_message(self, preco_atual: int, dias: int = 7) -> str:
+        """Gera mensagem de analise completa
+
+        Args:
+            preco_atual: Preco atual do item
+            dias: Numero de dias para exibir no historico (7, 15, 30, 60)
+        """
+        # Filtra entries pelo periodo
+        entries_periodo = self.entries[:dias]
+
+        # Calcula metricas baseadas no periodo selecionado
+        if len(entries_periodo) >= 2:
+            preco_atual_periodo = entries_periodo[0].preco_medio
+            preco_antigo = entries_periodo[-1].preco_medio
+            variacao = ((preco_atual_periodo - preco_antigo) / preco_antigo) * 100 if preco_antigo > 0 else 0
+
+            if variacao > 5:
+                tendencia = "subindo"
+            elif variacao < -5:
+                tendencia = "descendo"
+            else:
+                tendencia = "estavel"
+        else:
+            tendencia = "indefinida"
+            variacao = 0.0
+
         volatilidade = self.volatilidade()
         recomendacao, emoji_rec = self.recomendacao_compra(preco_atual)
         oferta = self.oferta_status()
@@ -227,13 +249,17 @@ class PriceHistory:
 
         msg += "\n\n"
 
-        # Historico resumido
-        msg += "📅 *Historico (7 dias):*\n"
-        for i, entry in enumerate(self.entries[:7]):
+        # Historico resumido (mostra quantos dias realmente disponiveis)
+        dias_disponiveis = len(entries_periodo)
+        if dias_disponiveis < dias:
+            msg += f"📅 *Historico ({dias_disponiveis}/{dias} dias disponiveis):*\n"
+        else:
+            msg += f"📅 *Historico ({dias} dias):*\n"
+        for i, entry in enumerate(entries_periodo):
             # Indicador de variacao dia a dia
-            if i < len(self.entries) - 1:
+            if i < len(entries_periodo) - 1:
                 preco_atual_dia = entry.preco_medio
-                preco_anterior = self.entries[i + 1].preco_medio
+                preco_anterior = entries_periodo[i + 1].preco_medio
                 if preco_atual_dia > preco_anterior:
                     emoji_dia = "📈"
                 elif preco_atual_dia < preco_anterior:
