@@ -91,8 +91,13 @@ class RagnatalesScraper:
             # Espera campo de busca carregar (timeout de 20s para servidor lento)
             search_field = self.page.ele("css:input[placeholder='Filtrar por nome']", timeout=20)
             search_field.click()
+
+            # Limpa campo usando JavaScript (mais confiavel)
+            self.page.run_js("arguments[0].value = ''", search_field)
             search_field.clear()
-            time.sleep(0.5)
+            time.sleep(1)
+
+            # Digita o termo de busca
             search_field.input(item_name + '\n')
             logger.info(f"Termo digitado no campo de busca: '{item_name}'")
 
