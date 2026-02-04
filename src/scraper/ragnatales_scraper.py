@@ -79,15 +79,18 @@ class RagnatalesScraper:
             bool: True se encontrou o item, False caso contrario
         """
         try:
-            # Navega para a pagina de itens
-            logger.debug(f"Navegando para: {Settings.RAGNATALES_URL}")
-            self.page.get(Settings.RAGNATALES_URL)
+            # Navega para a pagina de itens (URL limpa, sem filtros anteriores)
+            clean_url = Settings.RAGNATALES_URL.split('?')[0]
+            logger.debug(f"Navegando para: {clean_url}")
+            self.page.get(clean_url)
             time.sleep(Settings.PAGE_LOAD_TIMEOUT)
 
-            # Busca pelo item
+            # Busca pelo item - limpa campo completamente antes de digitar
             search_field = self.page.ele("css:input[placeholder='Filtrar por nome']")
             search_field.click()
-            search_field.clear()
+            # Seleciona todo o texto e apaga (mais confiavel que clear())
+            search_field.input('', clear=True)
+            time.sleep(0.5)
             search_field.input(item_name + '\n')
             logger.debug(f"Termo de busca enviado: '{item_name}'")
             time.sleep(Settings.SEARCH_TIMEOUT)
